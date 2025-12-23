@@ -1,11 +1,16 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Game, Snapshot } from "./types";
+import { Game, Snapshot, Screenshot } from "./types";
 import { open } from "@tauri-apps/plugin-dialog";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import "./App.css";
+import AddGameModal from "./components/AddGameModal";
+import GameList from "./components/GameList";
+import SnapshotList from "./components/SnapshotList";
+import SnapshotDetail from "./components/SnapshotDetail";
+import ScreenshotList from "./components/ScreenshotList";
+import ScreenshotDetail from "./components/ScreenshotDetail";
+import ConfirmDialog from "./components/ConfirmDialog";
 
 function App() {
   const [showWelcome, setShowWelcome] = useState(true);
@@ -13,23 +18,40 @@ function App() {
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [selectedSnapshot, setSelectedSnapshot] = useState<Snapshot | null>(null);
+  const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
+  const [selectedScreenshot, setSelectedScreenshot] = useState<Screenshot | null>(null);
+  const [activeTab, setActiveTab] = useState<"snapshots" | "screenshots">("snapshots");
   const [showAddModal, setShowAddModal] = useState(false);
   const [savePath, setSavePath] = useState<string>("");
   const [exePath, setExePath] = useState<string>("");
   const [noteText, setNoteText] = useState<string>("");
   const [imageCache, setImageCache] = useState<Record<string, string>>({});
   const [noteEditMode, setNoteEditMode] = useState<boolean>(true);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ show: false, title: "", message: "", onConfirm: () => {} });
 
   useEffect(() => {
-    const unlisten = listen<Snapshot>("snapshot-created", (event) => {
+    const unlistenSnapshot = listen<Snapshot>("snapshot-created", (event) => {
       console.log("New snapshot!", event.payload);
       if (selectedGame && event.payload.game_id === selectedGame.id) {
         setSnapshots((prev) => [event.payload, ...prev]);
       }
     });
 
+    const unlistenScreenshot = listen<Screenshot>("screenshot-created", (event) => {
+      console.log("New screenshot!", event.payload);
+      if (selectedGame && event.payload.game_id === selectedGame.id) {
+        setScreenshots((prev) => [event.payload, ...prev]);
+      }
+    });
+
     return () => {
-      unlisten.then((f) => f());
+      unlistenSnapshot.then((f) => f());
+      unlistenScreenshot.then((f) => f());
     };
   }, [selectedGame]);
 
@@ -51,58 +73,84 @@ function App() {
     setSelectedGame(game);
     const snaps = await invoke<Snapshot[]>("get_snapshots", { gameId: game.id });
     setSnapshots(snaps);
+    const screens = await invoke<Screenshot[]>("get_screenshots", { gameId: game.id });
+    setScreenshots(screens);
     setSelectedSnapshot(null);
+    setSelectedScreenshot(null);
     setNoteText("");
     setImageCache({});
   }
 
   function selectSnapshot(snapshot: Snapshot) {
     setSelectedSnapshot(snapshot);
+    setSelectedScreenshot(null);
     setNoteText(snapshot.note || "");
     setNoteEditMode(true);
   }
 
+  function selectScreenshot(screenshot: Screenshot) {
+    setSelectedScreenshot(screenshot);
+    setSelectedSnapshot(null);
+    setNoteText(screenshot.note || "");
+    setNoteEditMode(true);
+  }
+
   useEffect(() => {
-    if (!selectedSnapshot) return;
+    if (!selectedSnapshot && !selectedScreenshot) return;
 
     const timer = setTimeout(async () => {
       try {
-        await invoke("update_snapshot_note", {
-          snapshotId: selectedSnapshot.id,
-          note: noteText,
-        });
-        setSnapshots((prev) =>
-          prev.map((s) =>
-            s.id === selectedSnapshot.id ? { ...s, note: noteText } : s
-          )
-        );
-        setSelectedSnapshot((prev) =>
-          prev ? { ...prev, note: noteText } : null
-        );
+        if (selectedSnapshot) {
+          await invoke("update_snapshot_note", {
+            snapshotId: selectedSnapshot.id,
+            note: noteText,
+          });
+          setSnapshots((prev) =>
+            prev.map((s) =>
+              s.id === selectedSnapshot.id ? { ...s, note: noteText } : s
+            )
+          );
+          setSelectedSnapshot((prev) =>
+            prev ? { ...prev, note: noteText } : null
+          );
+        } else if (selectedScreenshot) {
+          await invoke("update_screenshot_note", {
+            screenshotId: selectedScreenshot.id,
+            note: noteText,
+          });
+          setScreenshots((prev) =>
+            prev.map((s) =>
+              s.id === selectedScreenshot.id ? { ...s, note: noteText } : s
+            )
+          );
+          setSelectedScreenshot((prev) =>
+            prev ? { ...prev, note: noteText } : null
+          );
+        }
       } catch (e) {
         console.error("Failed to save note:", e);
       }
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [noteText, selectedSnapshot]);
+  }, [noteText, selectedSnapshot, selectedScreenshot]);
 
   useEffect(() => {
-    async function preloadImages() {
-      const missing = snapshots.filter(
-        (s) => s.image_path && !imageCache[s.id]
+    async function preloadScreenshotImages() {
+      const missing = screenshots.filter(
+        (s) => !imageCache[s.id]
       );
       if (missing.length === 0) return;
 
       const results = await Promise.all(
         missing.map(async (s) => {
           try {
-            const dataUrl = await invoke<string>("load_snapshot_image_base64", {
+            const dataUrl = await invoke<string>("load_screenshot_image_base64", {
               imagePath: s.image_path,
             });
             return [s.id, dataUrl] as const;
           } catch (e) {
-            console.error("Failed to load snapshot image:", s.id, e);
+            console.error("Failed to load screenshot image:", s.id, e);
             return null;
           }
         })
@@ -120,28 +168,79 @@ function App() {
       });
     }
 
-    if (snapshots.length > 0) {
-      preloadImages();
+    if (screenshots.length > 0) {
+      preloadScreenshotImages();
     }
-  }, [snapshots, imageCache]);
+  }, [screenshots]);
 
-  async function handleDeleteGame(game: Game) {
-    if (!confirm(`确定要删除游戏「${game.name}」以及它的所有快照吗？`)) {
-      return;
-    }
-    try {
-      await invoke("delete_game", { gameId: game.id });
-      if (selectedGame?.id === game.id) {
-        setSelectedGame(null);
-        setSnapshots([]);
-        setSelectedSnapshot(null);
-        setNoteText("");
-      }
-      await loadGames();
-    } catch (e) {
-      console.error("Failed to delete game:", e);
-      alert("删除游戏失败: " + e);
-    }
+  function handleDeleteGame(game: Game) {
+    setConfirmDialog({
+      show: true,
+      title: "删除游戏",
+      message: `确定要删除游戏「${game.name}」以及它的所有快照吗？此操作不可撤销。`,
+      onConfirm: async () => {
+        setConfirmDialog({ show: false, title: "", message: "", onConfirm: () => {} });
+        try {
+          await invoke("delete_game", { gameId: game.id });
+          if (selectedGame?.id === game.id) {
+            setSelectedGame(null);
+            setSnapshots([]);
+            setSelectedSnapshot(null);
+            setNoteText("");
+          }
+          await loadGames();
+        } catch (e) {
+          console.error("Failed to delete game:", e);
+          alert("删除游戏失败: " + e);
+        }
+      },
+    });
+  }
+
+  function handleDeleteSnapshot(snapshot: Snapshot) {
+    const snapshotTime = new Date(snapshot.created_at).toLocaleString();
+    setConfirmDialog({
+      show: true,
+      title: "删除快照",
+      message: `确定要删除这个快照吗？\n时间：${snapshotTime}\n\n此操作不可撤销。`,
+      onConfirm: async () => {
+        setConfirmDialog({ show: false, title: "", message: "", onConfirm: () => {} });
+        try {
+          await invoke("delete_snapshot", { snapshotId: snapshot.id });
+          setSnapshots((prev) => prev.filter((s) => s.id !== snapshot.id));
+          if (selectedSnapshot?.id === snapshot.id) {
+            setSelectedSnapshot(null);
+            setNoteText("");
+          }
+        } catch (e) {
+          console.error("Failed to delete snapshot:", e);
+          alert("删除快照失败: " + e);
+        }
+      },
+    });
+  }
+
+  function handleDeleteScreenshot(screenshot: Screenshot) {
+    const screenshotTime = new Date(screenshot.created_at).toLocaleString();
+    setConfirmDialog({
+      show: true,
+      title: "删除截图",
+      message: `确定要删除这个截图吗？\n时间：${screenshotTime}\n\n此操作不可撤销。`,
+      onConfirm: async () => {
+        setConfirmDialog({ show: false, title: "", message: "", onConfirm: () => {} });
+        try {
+          await invoke("delete_screenshot", { screenshotId: screenshot.id });
+          setScreenshots((prev) => prev.filter((s) => s.id !== screenshot.id));
+          if (selectedScreenshot?.id === screenshot.id) {
+            setSelectedScreenshot(null);
+            setNoteText("");
+          }
+        } catch (e) {
+          console.error("Failed to delete screenshot:", e);
+          alert("删除截图失败: " + e);
+        }
+      },
+    });
   }
 
   async function handleAddGame(name: string, saveFolderPath: string, exeFilePath: string) {
@@ -216,282 +315,145 @@ function App() {
   if (showWelcome) {
     console.log("Rendering welcome page");
     return (
-      <div className="welcome-container">
-        <div className="welcome-content">
-          <h1 className="welcome-title">Galgame Save Assistant</h1>
-          <button className="start-button" onClick={handleStart}>
+      <div className="flex items-center justify-center h-screen w-screen bg-gradient-to-br from-blue-50 to-indigo-50">
+        <div className="text-center">
+          <h1 className="text-5xl font-semibold text-gray-900 mb-8">Galgame Save Assistant</h1>
+          <button
+            className="px-12 py-4 bg-blue-500 hover:bg-blue-600 text-white text-xl font-medium rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 active:scale-95"
+            onClick={handleStart}
+          >
             Start
           </button>
         </div>
       </div>
     );
-    }
+  }
 
   console.log("Rendering main functional page with three columns");
   return (
-    <div className="main-container">
-      <div className="left-sidebar">
-        <h2>My Games</h2>
-        <ul className="games-list">
-          {games.map((g) => (
-            <li
-              key={g.id}
-              className={selectedGame?.id === g.id ? "active" : ""}
-              onClick={() => selectGame(g)}
-            >
-              <span className="game-name">{g.name}</span>
-              <button
-                className="game-delete-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteGame(g);
-                }}
-                title="删除游戏"
-              >
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button 
-          onClick={handleAddGameClick}
-          style={{
-            marginTop: "auto",
-            padding: "12px 16px",
-            backgroundColor: "#646cff",
-            color: "white",
-            border: "none",
-            borderRadius: "8px",
-            cursor: "pointer",
-            fontSize: "1rem",
-            fontWeight: "500",
-            width: "100%"
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "#535bf2";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = "#646cff";
-          }}
-        >
-          + Add Game
-        </button>
-      </div>
+    <div className="flex h-screen w-screen bg-gray-50">
+      <GameList
+        games={games}
+        selectedGame={selectedGame}
+        onSelectGame={selectGame}
+        onDeleteGame={handleDeleteGame}
+        onAddGame={handleAddGameClick}
+      />
 
-      <div className="middle-panel">
-        {selectedGame ? (
-          <>
-            <div className="panel-header">
-              <h2>{selectedGame.name}</h2>
-              <p className="watching-info">游戏目录: {selectedGame.game_folder_path}</p>
-            </div>
-            <div className="snapshots-list">
-              {snapshots.length === 0 ? (
-                <p className="empty-message">No snapshots yet. Save your game to create one!</p>
-              ) : (
-                snapshots.map((s) => (
-                  <div
-                    key={s.id}
-                    className={`snapshot-item ${selectedSnapshot?.id === s.id ? "selected" : ""}`}
-                    onClick={() => selectSnapshot(s)}
-                  >
-                    {s.image_path && imageCache[s.id] && (
-                      <img src={imageCache[s.id]} alt="Snapshot thumbnail" className="snapshot-thumbnail" />
-                  )}
-                    <div className="snapshot-info">
-                      <span className="snapshot-time">{new Date(s.created_at).toLocaleString()}</span>
-                      <p className="snapshot-preview">{s.text_content?.substring(0, 50) || "No text captured"}...</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="empty-state">Select or Add a Game to start.</div>
-        )}
-      </div>
-
-      <div className="right-panel">
-        {selectedSnapshot ? (
-          <>
-            <div className="detail-section">
-              <h3>Screenshot</h3>
-              {selectedSnapshot.image_path && imageCache[selectedSnapshot.id] && (
-                <img src={imageCache[selectedSnapshot.id]} alt="Snapshot" className="detail-screenshot" />
-              )}
-            </div>
-            <div className="detail-section">
-              <h3>Context</h3>
-              <div className="context-content">
-                <p className="context-text">{selectedSnapshot.text_content || "No text captured"}</p>
-                <p className="context-meta">
-                  <strong>Time:</strong> {new Date(selectedSnapshot.created_at).toLocaleString()}
-                </p>
-                <p className="context-meta">
-                  <strong>File:</strong> {selectedSnapshot.original_save_path}
-                </p>
-              </div>
-            </div>
-            <div className="detail-section">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                <h3 style={{ margin: 0 }}>Notes</h3>
-                <button
-                  onClick={() => setNoteEditMode(!noteEditMode)}
-                  style={{
-                    padding: "6px 12px",
-                    fontSize: "0.85rem",
-                    backgroundColor: "#646cff",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {noteEditMode ? "Preview" : "Edit"}
-                </button>
-              </div>
-              {noteEditMode ? (
-                <textarea
-                  className="notes-input"
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Write your notes in Markdown..."
-                />
-              ) : (
-                <div className="notes-preview">
-                  {noteText ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {noteText}
-                    </ReactMarkdown>
-                  ) : (
-                    <p style={{ color: "#888", fontStyle: "italic" }}>No notes yet. Click Edit to add notes.</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="empty-detail">Select a snapshot to view details</div>
-        )}
-      </div>
-
-      {showAddModal && (
-        <div className="modal">
-          <div className="modal-content">
-            <h3>添加游戏</h3>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const form = e.target as HTMLFormElement;
-                const gameName = form.gameName.value;
-                console.log("Form submit - name:", gameName, "save:", savePath, "exe:", exePath);
-                if (!savePath) {
-                  alert("请先选择存档文件夹");
-                  return;
-                }
-                if (!exePath) {
-                  alert("请先选择游戏的可执行文件 (.exe)");
-                  return;
-                }
-                handleAddGame(gameName, savePath, exePath);
+      {selectedGame ? (
+        <div className="w-96 bg-white border-r border-gray-200 flex flex-col h-screen flex-shrink-0">
+          <div className="flex border-b border-gray-200 bg-gray-50/50">
+            <button
+              className={`flex-1 py-3 px-4 text-sm font-medium transition-colors relative ${
+                activeTab === "snapshots"
+                  ? "text-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+              onClick={() => {
+                setActiveTab("snapshots");
+                setSelectedSnapshot(null);
+                setSelectedScreenshot(null);
+                setNoteText("");
               }}
             >
-              <label style={{ display: "block", marginBottom: "8px", color: "#888", fontSize: "0.9rem" }}>
-                游戏名称
-              </label>
-              <input name="gameName" placeholder="输入游戏名称" required style={{ marginBottom: "20px" }} />
-              
-              <label style={{ display: "block", marginBottom: "8px", color: "#888", fontSize: "0.9rem" }}>
-                存档文件夹
-              </label>
-              <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
-                <input 
-                  name="savePath" 
-                  placeholder="请选择存档文件夹" 
-                  value={savePath}
-                  onChange={(e) => setSavePath(e.target.value)}
-                  required 
-                  style={{ flex: 1 }}
-                  readOnly
-                />
-                <button
-                  type="button"
-                  onClick={browseSaveFolder}
-                  style={{
-                    whiteSpace: "nowrap",
-                    backgroundColor: "#2a2a3a",
-                    color: "#fff",
-                  }}
-                >
-                  浏览...
-                </button>
-              </div>
-
-              <label style={{ display: "block", marginBottom: "8px", color: "#888", fontSize: "0.9rem" }}>
-                游戏可执行文件 (.exe)
-              </label>
-              <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
-                <input 
-                  name="exePath" 
-                  placeholder="请选择游戏exe文件" 
-                  value={exePath}
-                  onChange={(e) => setExePath(e.target.value)}
-                  required 
-                  style={{ flex: 1 }}
-                  readOnly
-                />
-                <button
-                  type="button"
-                  onClick={browseExeFile}
-                  style={{
-                    whiteSpace: "nowrap",
-                    backgroundColor: "#2a3a3a",
-                    color: "#fff",
-                  }}
-                >
-                  浏览...
-                </button>
-              </div>
-              <p style={{ fontSize: "0.85rem", color: "#888", marginBottom: "20px", marginTop: "-10px" }}>
-                提示：请选择游戏的存档文件夹和exe文件。软件会监控存档文件（例如 .dat）的变化，并针对该exe所在窗口生成快照。
-              </p>
-              
-              <div className="actions">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setSavePath("");
-                    setExePath("");
-                  }}
-                  style={{
-                    backgroundColor: "#3a3a3a",
-                    color: "#fff",
-                  }}
-                >
-                  取消
-                </button>
-                <button 
-                  type="submit"
-                  style={{
-                    backgroundColor: "#646cff",
-                    color: "white",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = "#535bf2";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = "#646cff";
-                  }}
-                >
-                  添加
-                </button>
-              </div>
-            </form>
+              快照
+              {activeTab === "snapshots" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+              )}
+            </button>
+            <button
+              className={`flex-1 py-3 px-4 text-sm font-medium transition-colors relative ${
+                activeTab === "screenshots"
+                  ? "text-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+              onClick={() => {
+                setActiveTab("screenshots");
+                setSelectedSnapshot(null);
+                setSelectedScreenshot(null);
+                setNoteText("");
+              }}
+            >
+              截图
+              {activeTab === "screenshots" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+              )}
+            </button>
           </div>
+          {activeTab === "snapshots" ? (
+            <SnapshotList
+              gameName={selectedGame.name}
+              gameFolderPath={selectedGame.game_folder_path}
+              snapshots={snapshots}
+              selectedSnapshot={selectedSnapshot}
+              imageCache={imageCache}
+              onSelectSnapshot={selectSnapshot}
+              onDeleteSnapshot={handleDeleteSnapshot}
+            />
+          ) : (
+            <ScreenshotList
+              gameName={selectedGame.name}
+              screenshots={screenshots}
+              selectedScreenshot={selectedScreenshot}
+              imageCache={imageCache}
+              onSelectScreenshot={selectScreenshot}
+              onDeleteScreenshot={handleDeleteScreenshot}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="w-96 bg-white border-r border-gray-200 flex items-center justify-center h-screen">
+          <div className="text-gray-400 text-lg">选择或添加游戏开始</div>
         </div>
       )}
+
+      {selectedSnapshot ? (
+        <SnapshotDetail
+          snapshot={selectedSnapshot}
+          imageCache={imageCache}
+          noteText={noteText}
+          noteEditMode={noteEditMode}
+          onNoteTextChange={setNoteText}
+          onNoteEditModeToggle={() => setNoteEditMode(!noteEditMode)}
+        />
+      ) : selectedScreenshot ? (
+        <ScreenshotDetail
+          screenshot={selectedScreenshot}
+          imageCache={imageCache}
+          noteText={noteText}
+          noteEditMode={noteEditMode}
+          onNoteTextChange={setNoteText}
+          onNoteEditModeToggle={() => setNoteEditMode(!noteEditMode)}
+        />
+      ) : (
+        <div className="flex-1 bg-gray-50 flex items-center justify-center">
+          <div className="text-gray-400 text-base">选择一个快照或截图查看详情</div>
+        </div>
+      )}
+
+      <AddGameModal
+        show={showAddModal}
+        savePath={savePath}
+        exePath={exePath}
+        onClose={() => {
+          setShowAddModal(false);
+          setSavePath("");
+          setExePath("");
+        }}
+        onSavePathChange={setSavePath}
+        onExePathChange={setExePath}
+        onBrowseSaveFolder={browseSaveFolder}
+        onBrowseExeFile={browseExeFile}
+        onSubmit={handleAddGame}
+      />
+
+      <ConfirmDialog
+        show={confirmDialog.show}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog({ show: false, title: "", message: "", onConfirm: () => {} })}
+      />
     </div>
   );
 }
