@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+
 interface ConfirmDialogProps {
   show: boolean;
   title: string;
@@ -6,6 +8,9 @@ interface ConfirmDialogProps {
   cancelText?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  showDeleteVisualLogger?: boolean;
+  onDeleteVisualLoggerChange?: (value: boolean) => void;
+  deleteVisualLoggerDefault?: boolean;
 }
 
 export default function ConfirmDialog({
@@ -16,8 +21,25 @@ export default function ConfirmDialog({
   cancelText = "取消",
   onConfirm,
   onCancel,
+  showDeleteVisualLogger = false,
+  onDeleteVisualLoggerChange,
+  deleteVisualLoggerDefault = false,
 }: ConfirmDialogProps) {
+  const [deleteVisualLogger, setDeleteVisualLogger] = useState(deleteVisualLoggerDefault);
+
+  useEffect(() => {
+    setDeleteVisualLogger(deleteVisualLoggerDefault);
+  }, [deleteVisualLoggerDefault, show]);
+
   if (!show) return null;
+
+  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.checked;
+    setDeleteVisualLogger(value);
+    if (onDeleteVisualLoggerChange) {
+      onDeleteVisualLoggerChange(value);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
@@ -30,6 +52,21 @@ export default function ConfirmDialog({
           <p className="text-gray-700 leading-relaxed whitespace-pre-line mb-6">
             {message}
           </p>
+          
+          {showDeleteVisualLogger && (
+            <div className="mb-6 flex items-center">
+              <input
+                type="checkbox"
+                id="deleteVisualLogger"
+                checked={deleteVisualLogger}
+                onChange={handleCheckboxChange}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+              />
+              <label htmlFor="deleteVisualLogger" className="ml-2 text-sm text-gray-700">
+                同时删除 visual-logger 文件夹
+              </label>
+            </div>
+          )}
           
           <div className="flex justify-end gap-3">
             <button

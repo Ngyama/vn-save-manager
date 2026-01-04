@@ -35,14 +35,6 @@ export default function SnapshotDetail({
               <p className="text-sm font-medium text-gray-700 mb-1">备份路径:</p>
               <p className="text-sm text-gray-600 break-all">{snapshot.backup_save_path}</p>
             </div>
-            {snapshot.text_content && (
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <p className="text-sm font-medium text-gray-700 mb-2">剪贴板内容:</p>
-                <p className="text-sm text-gray-600 whitespace-pre-wrap bg-gray-50 p-3 rounded-xl">
-                  {snapshot.text_content}
-                </p>
-              </div>
-            )}
           </div>
         </div>
 

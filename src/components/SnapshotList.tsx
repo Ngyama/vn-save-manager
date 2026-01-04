@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Snapshot } from "../types";
+import { invoke } from "@tauri-apps/api/core";
 
 interface SnapshotListProps {
   gameName: string;
@@ -8,6 +10,7 @@ interface SnapshotListProps {
   imageCache?: Record<string, string>;
   onSelectSnapshot: (snapshot: Snapshot) => void;
   onDeleteSnapshot: (snapshot: Snapshot) => void;
+  onSnapshotUpdate?: () => void;
 }
 
 export default function SnapshotList({
@@ -17,7 +20,44 @@ export default function SnapshotList({
   selectedSnapshot,
   onSelectSnapshot,
   onDeleteSnapshot,
+  onSnapshotUpdate,
 }: SnapshotListProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string>("");
+
+  async function handleNameEditStart(snapshot: Snapshot) {
+    setEditingId(snapshot.id);
+    setEditingName(snapshot.name);
+  }
+
+  async function handleNameSave(snapshot: Snapshot) {
+    if (editingName.trim() === "") {
+      setEditingName(snapshot.name);
+      setEditingId(null);
+      return;
+    }
+
+    try {
+      await invoke("update_snapshot_name", {
+        snapshotId: snapshot.id,
+        name: editingName.trim(),
+      });
+      setEditingId(null);
+      if (onSnapshotUpdate) {
+        onSnapshotUpdate();
+      }
+    } catch (e) {
+      console.error("Failed to update snapshot name:", e);
+      alert("更新快照名称失败: " + e);
+      setEditingName(snapshot.name);
+      setEditingId(null);
+    }
+  }
+
+  function handleNameCancel() {
+    setEditingId(null);
+    setEditingName("");
+  }
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="p-5 border-b border-gray-200 bg-white">
@@ -58,12 +98,37 @@ export default function SnapshotList({
                     </svg>
                   </button>
                 </div>
-                <div className="text-sm text-gray-700">
-                  <strong className="text-gray-900">文件:</strong> {s.original_save_path.split(/[/\\]/).pop() || s.original_save_path}
-                </div>
-                <p className="text-sm text-gray-600 line-clamp-2">
-                  {s.text_content?.substring(0, 50) || "无剪贴板内容"}...
-                </p>
+                {editingId === s.id ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onBlur={() => handleNameSave(s)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleNameSave(s);
+                        } else if (e.key === "Escape") {
+                          handleNameCancel();
+                        }
+                      }}
+                      autoFocus
+                      className="flex-1 px-3 py-1.5 text-sm text-gray-900 bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="text-sm font-medium text-gray-900 cursor-text hover:text-blue-600 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNameEditStart(s);
+                    }}
+                    title="点击编辑名称"
+                  >
+                    {s.name}
+                  </div>
+                )}
               </div>
             </div>
           ))

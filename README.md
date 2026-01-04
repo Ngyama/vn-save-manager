@@ -1,22 +1,17 @@
-# Visual Save Assistant
+# VN Save Manager
 
-<details open>
-<summary><b>English</b></summary>
+**Language / 言語 / 语言**: [English](#english) | [日本語](#日本語) | [简体中文](#简体中文)
 
-## Visual Save Assistant
+---
+
+<a name="english"></a>
+## English
+
+### VN Save Manager
 
 A modern game save management tool with automatic snapshot backup and manual screenshot capture features.
 
-### Requirements
-
-- **Windows 10/11**
-- No additional dependencies required
-
-### Installation
-
-1. Download the latest MSI installer from the [Releases](../../releases) page
-2. Run the installer and follow the setup wizard
-3. Launch the application from the Start menu or desktop shortcut
+> **Note**: The application interface currently only supports Chinese. Support for other languages will be added in future updates.
 
 ### Usage
 
@@ -26,48 +21,35 @@ A modern game save management tool with automatic snapshot backup and manual scr
 2. Enter the game name
 3. Select the game's save folder (where `.dat` files are located)
 4. Select the game executable (`.exe`) file
-5. The tool will automatically create the `visual-logger` folder structure in the game's directory
 
 #### Snapshots
 
-- Snapshots are created automatically when the tool detects changes in save files
-- Select a game from the list to view all its snapshots
+- Snapshots are created automatically when save files change
+- Select a game to view all its snapshots
 - Click on a snapshot to view details and add/edit notes
-- Delete unwanted snapshots from the list
 
 #### Screenshots
 
-1. While playing the game, press **F11** to capture the current game window
-2. Switch to the "Screenshots" tab to see all captured images
-3. Click on a screenshot to view and add/edit notes about the scene
-4. Delete unwanted screenshots
+1. Press **F11** while playing to capture the game window
+2. Switch to the "Screenshots" tab to view captured images
+3. Click on a screenshot to view and add/edit notes
 
 ### Features
 
-- **Automatic Save Snapshots**: Monitors game save directories and creates snapshots when `.dat` files change
-- **Manual Screenshots**: Press F11 to capture game windows at any moment
-- **Notes Management**: Add personal notes to snapshots and screenshots
-- **Modern UI**: Clean, iOS-like interface with rounded corners
+- Automatic save snapshots
+- Manual screenshots (F11 hotkey)
+- Notes management
 
-</details>
+---
 
-<details>
-<summary><b>日本語</b></summary>
+<a name="日本語"></a>
+## 日本語
 
-## Visual Save Assistant
+### VN Save Manager
 
-ゲームセーブ管理ツール。自動スナップショットバックアップと手動スクリーンショット機能を備えたモダンなアプリケーション。
+自動スナップショットバックアップと手動スクリーンショット機能を備えたゲームセーブ管理ツール。
 
-### 必要要件
-
-- **Windows 10/11**
-- 追加の依存関係は不要
-
-### インストール
-
-1. [Releases](../../releases) ページから最新のMSIインストーラーをダウンロード
-2. インストーラーを実行し、セットアップウィザードに従う
-3. スタートメニューまたはデスクトップショートカットからアプリケーションを起動
+> **注意**: アプリケーションのインターフェースは現在中国語のみをサポートしています。他の言語のサポートは今後の更新で追加予定です。
 
 ### 使い方
 
@@ -77,27 +59,60 @@ A modern game save management tool with automatic snapshot backup and manual scr
 2. ゲーム名を入力
 3. ゲームのセーブフォルダ（`.dat`ファイルがある場所）を選択
 4. ゲームの実行ファイル（`.exe`）を選択
-5. ツールは自動的にゲームディレクトリに`visual-logger`フォルダ構造を作成します
 
 #### スナップショット
 
-- ツールがセーブファイルの変更を検出すると、スナップショットが自動的に作成されます
-- リストからゲームを選択して、すべてのスナップショットを表示
+- セーブファイルの変更時に自動的にスナップショットが作成されます
+- ゲームを選択してすべてのスナップショットを表示
 - スナップショットをクリックして詳細を表示し、ノートを追加/編集
-- リストから不要なスナップショットを削除
 
 #### スクリーンショット
 
-1. ゲームをプレイ中に**F11**キーを押して、現在のゲームウィンドウをキャプチャ
-2. 「スクリーンショット」タブに切り替えて、キャプチャされたすべての画像を表示
-3. スクリーンショットをクリックして、シーンに関するノートを表示/追加/編集
-4. 不要なスクリーンショットを削除
+1. ゲーム中に**F11**キーを押してゲームウィンドウをキャプチャ
+2. 「スクリーンショット」タブに切り替えて画像を表示
+3. スクリーンショットをクリックしてノートを表示/追加/編集
 
 ### 機能
 
-- **自動セーブスナップショット**: ゲームのセーブディレクトリを監視し、`.dat`ファイルが変更されたときにスナップショットを作成
-- **手動スクリーンショット**: F11キーでいつでもゲームウィンドウをキャプチャ
-- **ノート管理**: スナップショットとスクリーンショットに個人的なノートを追加
-- **モダンなUI**: 角丸を使用したクリーンなiOS風インターフェース
+- 自動セーブスナップショット
+- 手動スクリーンショット（F11ホットキー）
+- ノート管理
 
-</details>
+---
+
+<a name="简体中文"></a>
+## 简体中文
+
+### VN Save Manager
+
+具有自动快照备份和手动截图功能的游戏存档管理工具。
+
+> **注意**: 应用程序界面目前仅支持中文，其他语言支持将在后续更新中添加。
+
+### 使用方法
+
+#### 添加游戏
+
+1. 点击 **"添加游戏"** 按钮
+2. 输入游戏名称
+3. 选择游戏的存档文件夹（`.dat` 文件所在位置）
+4. 选择游戏的执行文件（`.exe`）
+
+#### 快照
+
+- 存档文件更改时会自动创建快照
+- 选择游戏以查看所有快照
+- 点击快照以查看详细信息并添加/编辑备注
+
+#### 截图
+
+1. 游戏过程中按 **F11** 键捕获游戏窗口
+2. 切换到"截图"标签页以查看捕获的图像
+3. 点击截图以查看和添加/编辑备注
+
+### 功能
+
+- 自动存档快照
+- 手动截图（F11 快捷键）
+- 备注管理
+- 现代化的 iOS 风格界面

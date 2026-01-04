@@ -10,9 +10,9 @@ export interface Game {
 export interface Snapshot {
     id: string;
     game_id: string;
+    name: string;
     original_save_path: string;
     backup_save_path: string;
-    text_content?: string;
     note?: string;
     created_at: string;
 }

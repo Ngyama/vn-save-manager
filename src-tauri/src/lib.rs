@@ -1,4 +1,4 @@
-use tauri::{Manager, State};
+use tauri::{Manager, State, Emitter};
 use std::sync::{Arc, Mutex};
 
 mod db;
@@ -17,6 +17,16 @@ use global_hotkey::{
     GlobalHotKeyManager,
 };
 
+#[cfg(target_os = "windows")]
+struct AppState {
+    db: Database,
+    watcher: Arc<Mutex<SaveWatcher>>,
+    snapshot_manager: Arc<Mutex<SnapshotManager>>,
+    screenshot_manager: Arc<Mutex<ScreenshotManager>>,
+    hotkey_manager: Arc<Mutex<Option<GlobalHotKeyManager>>>,
+}
+
+#[cfg(not(target_os = "windows"))]
 struct AppState {
     db: Database,
     watcher: Arc<Mutex<SaveWatcher>>,
@@ -95,13 +105,36 @@ fn update_snapshot_note(state: State<AppState>, snapshot_id: String, note: Strin
 }
 
 #[tauri::command]
-fn delete_game(state: State<AppState>, game_id: String) -> Result<(), String> {
-    state.db.delete_game(&game_id).map_err(|e| e.to_string())
+fn update_snapshot_name(state: State<AppState>, snapshot_id: String, name: String) -> Result<(), String> {
+    state.db.update_snapshot_name(&snapshot_id, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_game(state: State<AppState>, game_id: String, delete_visual_logger: bool) -> Result<(), String> {
+    state.db.delete_game(&game_id, delete_visual_logger).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn delete_snapshot(state: State<AppState>, snapshot_id: String) -> Result<(), String> {
-    state.db.delete_snapshot(&snapshot_id).map_err(|e| e.to_string())
+    use std::fs;
+    
+    // Get snapshot before deleting
+    let snapshot = state.db.get_snapshot(&snapshot_id).map_err(|e| e.to_string())?;
+    
+    // Delete from database
+    state.db.delete_snapshot(&snapshot_id).map_err(|e| e.to_string())?;
+    
+    // Delete backup directory
+    let backup_path = std::path::Path::new(&snapshot.backup_save_path);
+    if backup_path.exists() {
+        if backup_path.is_dir() {
+            fs::remove_dir_all(backup_path).map_err(|e| format!("Failed to delete snapshot directory: {}", e))?;
+        } else {
+            fs::remove_file(backup_path).map_err(|e| format!("Failed to delete snapshot file: {}", e))?;
+        }
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -131,7 +164,21 @@ fn update_screenshot_note(state: State<AppState>, screenshot_id: String, note: S
 
 #[tauri::command]
 fn delete_screenshot(state: State<AppState>, screenshot_id: String) -> Result<(), String> {
-    state.db.delete_screenshot(&screenshot_id).map_err(|e| e.to_string())
+    use std::fs;
+    
+    // Get screenshot before deleting
+    let screenshot = state.db.get_screenshot(&screenshot_id).map_err(|e| e.to_string())?;
+    
+    // Delete from database
+    state.db.delete_screenshot(&screenshot_id).map_err(|e| e.to_string())?;
+    
+    // Delete image file
+    let image_path = std::path::Path::new(&screenshot.image_path);
+    if image_path.exists() {
+        fs::remove_file(image_path).map_err(|e| format!("Failed to delete screenshot file: {}", e))?;
+    }
+    
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -210,37 +257,148 @@ pub fn run() {
             });
 
             #[cfg(target_os = "windows")]
-            {
+            let hotkey_manager = {
                 let manager = GlobalHotKeyManager::new().map_err(|e| format!("Failed to create hotkey manager: {}", e))?;
                 let hotkey = HotKey::new(None, Code::F11);
-                manager.register(hotkey).map_err(|e| format!("Failed to register F11 hotkey: {}", e))?;
+                manager.register(hotkey.clone()).map_err(|e| format!("Failed to register F11 hotkey: {}", e))?;
+                
+                println!("F11 hotkey registered successfully");
                 
                 let hotkey_id = hotkey.id();
                 let screenshot_manager_for_hotkey = screenshot_manager.clone();
+                let app_handle_for_hotkey = handle.clone();
+                let last_screenshot_time = Arc::new(Mutex::new(std::time::Instant::now()));
+                let is_capturing = Arc::new(Mutex::new(false));
+                let debounce_duration = std::time::Duration::from_millis(2000);
                 
                 std::thread::spawn(move || {
                     use global_hotkey::GlobalHotKeyEvent;
                     
+                    println!("Hotkey event listener thread started");
+                    
+                    let receiver = GlobalHotKeyEvent::receiver();
+                    
                     loop {
-                        if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-                            if event.id == hotkey_id {
-                                println!("F11 pressed, capturing screenshot...");
-                                match screenshot_manager_for_hotkey.lock() {
-                                    Ok(sm) => {
-                                        match sm.capture_screenshot_for_running_game() {
-                                            Ok(_) => println!("Screenshot captured successfully"),
-                                            Err(e) => eprintln!("Failed to capture screenshot: {}", e),
+                        // Use blocking recv to process one event at a time
+                        match receiver.recv() {
+                            Ok(event) => {
+                                println!("Received hotkey event: id={:?}", event.id);
+                                if event.id == hotkey_id {
+                                    // CRITICAL: Check flag FIRST before processing
+                                    // This prevents race conditions where multiple events are queued
+                                    let can_process = {
+                                        match (last_screenshot_time.lock(), is_capturing.lock()) {
+                                            (Ok(last_time), Ok(capturing)) => {
+                                                if *capturing {
+                                                    println!("Screenshot already in progress, dropping this event");
+                                                    false
+                                                } else if last_time.elapsed() < debounce_duration {
+                                                    println!("Screenshot debounce active (elapsed: {:?}, required: {:?}), dropping this event", last_time.elapsed(), debounce_duration);
+                                                    false
+                                                } else {
+                                                    true
+                                                }
+                                            },
+                                            _ => {
+                                                eprintln!("Failed to lock mutexes");
+                                                false
+                                            },
                                         }
-                                    },
-                                    Err(e) => eprintln!("Failed to lock screenshot_manager: {}", e),
+                                    };
+                                    
+                                    if !can_process {
+                                        // Skip this event and continue
+                                        continue;
+                                    }
+                                    
+                                    // Now set the flags atomically
+                                    let should_capture = {
+                                        match (last_screenshot_time.lock(), is_capturing.lock()) {
+                                            (Ok(mut last_time), Ok(mut capturing)) => {
+                                                // Double-check in case another thread set it (shouldn't happen but be safe)
+                                                if *capturing {
+                                                    println!("Screenshot flag was set while we were checking, dropping event");
+                                                    false
+                                                } else {
+                                                    *last_time = std::time::Instant::now();
+                                                    *capturing = true;
+                                                    println!("Starting screenshot capture... (is_capturing set to true)");
+                                                    true
+                                                }
+                                            },
+                                            _ => {
+                                                eprintln!("Failed to lock mutexes for setting flags");
+                                                false
+                                            },
+                                        }
+                                    };
+                                    
+                                    if should_capture {
+                                        // Drain any additional pending events for the same hotkey IMMEDIATELY
+                                        let mut duplicate_count = 0;
+                                        while let Ok(next_event) = receiver.try_recv() {
+                                            if next_event.id == hotkey_id {
+                                                duplicate_count += 1;
+                                                println!("Dropping duplicate hotkey event #{}", duplicate_count);
+                                            }
+                                        }
+                                        
+                                        println!("F11 pressed, capturing screenshot...");
+                                        let is_capturing_clone = is_capturing.clone();
+                                        match screenshot_manager_for_hotkey.lock() {
+                                            Ok(sm) => {
+                                                match sm.capture_screenshot_for_running_game() {
+                                                    Ok(screenshot) => {
+                                                        println!("Screenshot captured successfully: {}", screenshot.image_path);
+                                                        let _ = app_handle_for_hotkey.emit("screenshot-created", &screenshot);
+                                                        // Reset flag AFTER screenshot is complete
+                                                        if let Ok(mut capturing) = is_capturing_clone.lock() {
+                                                            *capturing = false;
+                                                            println!("Screenshot complete, is_capturing reset to false");
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        eprintln!("Failed to capture screenshot: {}", e);
+                                                        eprintln!("Error details: {:?}", e);
+                                                        if let Ok(mut capturing) = is_capturing_clone.lock() {
+                                                            *capturing = false;
+                                                            println!("Screenshot failed, is_capturing reset to false");
+                                                        }
+                                                    },
+                                                }
+                                            },
+                                            Err(e) => {
+                                                eprintln!("Failed to lock screenshot_manager: {}", e);
+                                                if let Ok(mut capturing) = is_capturing_clone.lock() {
+                                                    *capturing = false;
+                                                    println!("Lock failed, is_capturing reset to false");
+                                                }
+                                            },
+                                        }
+                                    }
                                 }
+                            },
+                            Err(e) => {
+                                eprintln!("Hotkey event receiver error: {:?}", e);
+                                break;
                             }
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
                     }
                 });
-            }
+                
+                Arc::new(Mutex::new(Some(manager)))
+            };
 
+            #[cfg(target_os = "windows")]
+            app.manage(AppState {
+                db,
+                watcher: watcher_arc,
+                snapshot_manager,
+                screenshot_manager,
+                hotkey_manager,
+            });
+
+            #[cfg(not(target_os = "windows"))]
             app.manage(AppState {
                 db,
                 watcher: watcher_arc,
@@ -259,6 +417,7 @@ pub fn run() {
             delete_snapshot,
             load_snapshot_image_base64,
             update_snapshot_note,
+            update_snapshot_name,
             capture_screenshot,
             get_screenshots,
             update_screenshot_note,

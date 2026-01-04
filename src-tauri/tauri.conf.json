@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "galgame-save-assistant",
+  "productName": "vn-save-manager",
   "version": "0.1.0",
-  "identifier": "com.linxy.galgame-save-assistant",
+  "identifier": "com.linxy.vn-save-manager",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "galgame-save-assistant",
+        "title": "vn-save-manager",
         "width": 1200,
         "height": 800,
         "resizable": false,

@@ -32,7 +32,11 @@ function App() {
     title: string;
     message: string;
     onConfirm: () => void;
+    showDeleteVisualLogger?: boolean;
+    deleteVisualLogger?: boolean;
+    onDeleteVisualLoggerChange?: (value: boolean) => void;
   }>({ show: false, title: "", message: "", onConfirm: () => {} });
+  const [deleteVisualLogger, setDeleteVisualLogger] = useState(false);
 
   useEffect(() => {
     const unlistenSnapshot = listen<Snapshot>("snapshot-created", (event) => {
@@ -45,7 +49,14 @@ function App() {
     const unlistenScreenshot = listen<Screenshot>("screenshot-created", (event) => {
       console.log("New screenshot!", event.payload);
       if (selectedGame && event.payload.game_id === selectedGame.id) {
-        setScreenshots((prev) => [event.payload, ...prev]);
+        setScreenshots((prev) => {
+          const exists = prev.some(s => s.id === event.payload.id);
+          if (exists) {
+            console.log("Screenshot already exists, skipping:", event.payload.id);
+            return prev;
+          }
+          return [event.payload, ...prev];
+        });
       }
     });
 
@@ -174,14 +185,18 @@ function App() {
   }, [screenshots]);
 
   function handleDeleteGame(game: Game) {
+    setDeleteVisualLogger(false);
     setConfirmDialog({
       show: true,
       title: "删除游戏",
-      message: `确定要删除游戏「${game.name}」以及它的所有快照吗？此操作不可撤销。`,
+      message: `确定要删除游戏「${game.name}」以及它的所有快照和截图吗？此操作不可撤销。`,
+      showDeleteVisualLogger: true,
+      deleteVisualLogger: false,
+      onDeleteVisualLoggerChange: setDeleteVisualLogger,
       onConfirm: async () => {
         setConfirmDialog({ show: false, title: "", message: "", onConfirm: () => {} });
         try {
-          await invoke("delete_game", { gameId: game.id });
+          await invoke("delete_game", { gameId: game.id, deleteVisualLogger: deleteVisualLogger });
           if (selectedGame?.id === game.id) {
             setSelectedGame(null);
             setSnapshots([]);
@@ -317,7 +332,7 @@ function App() {
     return (
       <div className="flex items-center justify-center h-screen w-screen bg-gradient-to-br from-blue-50 to-indigo-50">
         <div className="text-center">
-          <h1 className="text-5xl font-semibold text-gray-900 mb-8">Galgame Save Assistant</h1>
+          <h1 className="text-5xl font-semibold text-gray-900 mb-8">VN Save Manager</h1>
           <button
             className="px-12 py-4 bg-blue-500 hover:bg-blue-600 text-white text-xl font-medium rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 active:scale-95"
             onClick={handleStart}
@@ -389,6 +404,18 @@ function App() {
               imageCache={imageCache}
               onSelectSnapshot={selectSnapshot}
               onDeleteSnapshot={handleDeleteSnapshot}
+              onSnapshotUpdate={async () => {
+                if (selectedGame) {
+                  const snaps = await invoke<Snapshot[]>("get_snapshots", { gameId: selectedGame.id });
+                  setSnapshots(snaps);
+                  if (selectedSnapshot) {
+                    const updated = snaps.find((s) => s.id === selectedSnapshot.id);
+                    if (updated) {
+                      setSelectedSnapshot(updated);
+                    }
+                  }
+                }
+              }}
             />
           ) : (
             <ScreenshotList
@@ -453,6 +480,9 @@ function App() {
         message={confirmDialog.message}
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog({ show: false, title: "", message: "", onConfirm: () => {} })}
+        showDeleteVisualLogger={confirmDialog.showDeleteVisualLogger}
+        onDeleteVisualLoggerChange={confirmDialog.onDeleteVisualLoggerChange}
+        deleteVisualLoggerDefault={confirmDialog.deleteVisualLogger || false}
       />
     </div>
   );

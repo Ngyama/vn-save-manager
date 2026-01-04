@@ -7,7 +7,6 @@ use tauri::AppHandle;
 use tauri::Emitter;
 use chrono::Utc;
 use uuid::Uuid;
-use arboard::Clipboard;
 
 pub struct SnapshotManager {
     db: Database,
@@ -76,7 +75,7 @@ impl SnapshotManager {
         fs::create_dir_all(&snapshot_folder)?;
 
         let uuid = Uuid::new_v4().to_string();
-
+        
         std::thread::sleep(std::time::Duration::from_millis(200));
 
         let dat_file_name = changed_file_path.file_name()
@@ -86,8 +85,7 @@ impl SnapshotManager {
         let dat_backup_path = snapshot_folder.join(dat_file_name);
         fs::copy(changed_file_path, &dat_backup_path)?;
 
-        let mut clipboard = Clipboard::new()?;
-        let text_content = clipboard.get_text().ok();
+        let default_name = format!("快照 {}", Utc::now().format("%Y-%m-%d %H:%M:%S"));
 
         let metadata = serde_json::json!({
             "id": uuid,
@@ -109,9 +107,9 @@ impl SnapshotManager {
         let snapshot = Snapshot {
             id: uuid,
             game_id: game.id,
+            name: default_name,
             original_save_path: changed_file_path.to_string_lossy().to_string(),
             backup_save_path: snapshot_folder.to_string_lossy().to_string(),
-            text_content,
             note: None,
             created_at: Utc::now().to_rfc3339(),
         };
