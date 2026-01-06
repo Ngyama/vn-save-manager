@@ -60,7 +60,6 @@ impl SnapshotManager {
         let game = match target_game {
             Some(g) => g,
             None => {
-                println!("File {:?} does not belong to any known game.", changed_file_path);
                 return Ok(());
             }
         };
@@ -119,7 +118,7 @@ impl SnapshotManager {
         {
             match last_snapshot_time.lock() {
                 Ok(mut last_time) => *last_time = Instant::now(),
-                Err(e) => eprintln!("Failed to update last_snapshot_time: {}", e),
+                Err(_) => {},
             }
         }
         

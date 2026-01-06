@@ -18,11 +18,12 @@ export interface Snapshot {
 }
 
 export interface Screenshot {
-    id: string;
-    game_id: string;
-    image_path: string;
-    note?: string;
-    created_at: string;
+  id: string;
+  game_id: string;
+  name: string;
+  image_path: string;
+  note?: string;
+  created_at: string;
 }
 
 

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Snapshot } from "../types";
+import { invoke } from "@tauri-apps/api/core";
 
 interface SnapshotDetailProps {
   snapshot: Snapshot;
@@ -7,6 +9,7 @@ interface SnapshotDetailProps {
   noteEditMode: boolean;
   onNoteTextChange: (text: string) => void;
   onNoteEditModeToggle: () => void;
+  onRestoreSuccess?: () => void;
 }
 
 export default function SnapshotDetail({
@@ -15,7 +18,29 @@ export default function SnapshotDetail({
   noteEditMode,
   onNoteTextChange,
   onNoteEditModeToggle,
+  onRestoreSuccess,
 }: SnapshotDetailProps) {
+  const [isRestoring, setIsRestoring] = useState(false);
+
+  async function handleRestore() {
+    if (!confirm(`确定要恢复这个快照吗？\n这将会替换当前的存档文件：\n${snapshot.original_save_path}\n\n此操作不可撤销。`)) {
+      return;
+    }
+
+    setIsRestoring(true);
+    try {
+      await invoke("restore_snapshot", { snapshotId: snapshot.id });
+      alert("快照恢复成功！");
+      if (onRestoreSuccess) {
+        onRestoreSuccess();
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      alert("恢复快照失败: " + errorMsg);
+    } finally {
+      setIsRestoring(false);
+    }
+  }
   return (
     <div className="flex-1 bg-gray-50 overflow-y-auto">
       <div className="p-6 border-b border-gray-200 bg-white">
@@ -25,7 +50,16 @@ export default function SnapshotDetail({
       
       <div className="p-6 space-y-6">
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <h4 className="text-base font-semibold text-gray-900 mb-4">存档信息</h4>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-base font-semibold text-gray-900">存档信息</h4>
+            <button
+              onClick={handleRestore}
+              disabled={isRestoring}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {isRestoring ? "恢复中..." : "恢复快照"}
+            </button>
+          </div>
           <div className="space-y-3">
             <div>
               <p className="text-sm font-medium text-gray-700 mb-1">原始路径:</p>

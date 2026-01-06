@@ -46,14 +46,15 @@ pub fn start_watcher_loop(rx: Receiver<notify::Result<Event>>, app_handle: AppHa
                             }
                             last_event_time = std::time::Instant::now();
 
-                            println!("File changed: {:?}", event.paths);
 
-                            app_handle.emit("save-detected", event.paths).unwrap();
+                            if let Err(e) = app_handle.emit("save-detected", event.paths) {
+                                // Failed to send event
+                            }
                         },
                         _ => {}
                     }
                 },
-                Err(e) => println!("watch error: {:?}", e),
+                Err(_) => {},
             }
         }
     });

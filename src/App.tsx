@@ -39,35 +39,38 @@ function App() {
   const [deleteVisualLogger, setDeleteVisualLogger] = useState(false);
 
   useEffect(() => {
-    const unlistenSnapshot = listen<Snapshot>("snapshot-created", (event) => {
-      console.log("New snapshot!", event.payload);
+    let unlistenSnapshot: (() => void) | undefined;
+    let unlistenScreenshot: (() => void) | undefined;
+
+    listen<Snapshot>("snapshot-created", (event) => {
       if (selectedGame && event.payload.game_id === selectedGame.id) {
         setSnapshots((prev) => [event.payload, ...prev]);
       }
-    });
+    }).then((fn) => {
+      unlistenSnapshot = fn;
+    }).catch(() => {});
 
-    const unlistenScreenshot = listen<Screenshot>("screenshot-created", (event) => {
-      console.log("New screenshot!", event.payload);
+    listen<Screenshot>("screenshot-created", (event) => {
       if (selectedGame && event.payload.game_id === selectedGame.id) {
         setScreenshots((prev) => {
           const exists = prev.some(s => s.id === event.payload.id);
           if (exists) {
-            console.log("Screenshot already exists, skipping:", event.payload.id);
             return prev;
           }
           return [event.payload, ...prev];
         });
       }
-    });
+    }).then((fn) => {
+      unlistenScreenshot = fn;
+    }).catch(() => {});
 
     return () => {
-      unlistenSnapshot.then((f) => f());
-      unlistenScreenshot.then((f) => f());
+      if (unlistenSnapshot) unlistenSnapshot();
+      if (unlistenScreenshot) unlistenScreenshot();
     };
   }, [selectedGame]);
 
   function handleStart() {
-    console.log("Start button clicked, switching to main view");
     setShowWelcome(false);
     loadGames();
   }
@@ -139,7 +142,7 @@ function App() {
           );
         }
       } catch (e) {
-        console.error("Failed to save note:", e);
+        // Note save failed silently
       }
     }, 1000);
 
@@ -161,7 +164,6 @@ function App() {
             });
             return [s.id, dataUrl] as const;
           } catch (e) {
-            console.error("Failed to load screenshot image:", s.id, e);
             return null;
           }
         })
@@ -205,8 +207,8 @@ function App() {
           }
           await loadGames();
         } catch (e) {
-          console.error("Failed to delete game:", e);
-          alert("删除游戏失败: " + e);
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          alert(`删除游戏失败\n\n错误: ${errorMsg}\n\n请检查游戏文件是否被占用或权限是否足够。`);
         }
       },
     });
@@ -228,8 +230,8 @@ function App() {
             setNoteText("");
           }
         } catch (e) {
-          console.error("Failed to delete snapshot:", e);
-          alert("删除快照失败: " + e);
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          alert(`删除快照失败\n\n错误: ${errorMsg}\n\n请检查文件是否被占用或权限是否足够。`);
         }
       },
     });
@@ -251,8 +253,8 @@ function App() {
             setNoteText("");
           }
         } catch (e) {
-          console.error("Failed to delete screenshot:", e);
-          alert("删除截图失败: " + e);
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          alert(`删除截图失败\n\n错误: ${errorMsg}\n\n请检查文件是否被占用或权限是否足够。`);
         }
       },
     });
@@ -268,20 +270,25 @@ function App() {
       return;
     }
     try {
-      console.log("Adding game:", name, saveFolderPath, exeFilePath);
-      const result = await invoke("add_game", {
+      await invoke("add_game", {
         name,
         saveFolderPath,
         exePath: exeFilePath,
       });
-      console.log("Game added successfully:", result);
       await loadGames();
       setShowAddModal(false);
       setSavePath("");
       setExePath("");
     } catch (e) {
       console.error("Failed to add game:", e);
-      alert("添加游戏失败: " + e);
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      if (errorMsg.includes("已存在")) {
+        alert(`添加游戏失败\n\n${errorMsg}\n\n请使用不同的游戏名称。`);
+      } else if (errorMsg.includes("不存在")) {
+        alert(`添加游戏失败\n\n${errorMsg}\n\n请确认路径是否正确。`);
+      } else {
+        alert(`添加游戏失败\n\n错误: ${errorMsg}`);
+      }
     }
   }
 
@@ -302,7 +309,7 @@ function App() {
         setSavePath(selected);
       }
     } catch (e) {
-      console.error("Failed to select save folder:", e);
+      // Dialog cancelled or error
     }
   }
 
@@ -323,12 +330,11 @@ function App() {
         setExePath(selected);
       }
     } catch (e) {
-      console.error("Failed to select exe file:", e);
+      // Dialog cancelled or error
     }
   }
 
   if (showWelcome) {
-    console.log("Rendering welcome page");
     return (
       <div className="flex items-center justify-center h-screen w-screen bg-gradient-to-br from-blue-50 to-indigo-50">
         <div className="text-center">
@@ -344,7 +350,6 @@ function App() {
     );
   }
 
-  console.log("Rendering main functional page with three columns");
   return (
     <div className="flex h-screen w-screen bg-gray-50">
       <GameList
@@ -425,6 +430,21 @@ function App() {
               imageCache={imageCache}
               onSelectScreenshot={selectScreenshot}
               onDeleteScreenshot={handleDeleteScreenshot}
+              onScreenshotUpdate={async () => {
+                if (selectedGame) {
+                  const screens = await invoke<Screenshot[]>("get_screenshots", { gameId: selectedGame.id });
+                  setScreenshots(screens);
+                  if (selectedScreenshot) {
+                    const updated = screens.find((s) => s.id === selectedScreenshot.id);
+                    if (!updated) {
+                      setSelectedScreenshot(null);
+                      setNoteText("");
+                    } else {
+                      setSelectedScreenshot(updated);
+                    }
+                  }
+                }
+              }}
             />
           )}
         </div>
@@ -442,6 +462,11 @@ function App() {
           noteEditMode={noteEditMode}
           onNoteTextChange={setNoteText}
           onNoteEditModeToggle={() => setNoteEditMode(!noteEditMode)}
+          onRestoreSuccess={async () => {
+            if (selectedGame) {
+              await selectGame(selectedGame);
+            }
+          }}
         />
       ) : selectedScreenshot ? (
         <ScreenshotDetail

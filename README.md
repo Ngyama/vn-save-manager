@@ -115,4 +115,3 @@ A modern game save management tool with automatic snapshot backup and manual scr
 - 自动存档快照
 - 手动截图（F11 快捷键）
 - 备注管理
-- 现代化的 iOS 风格界面

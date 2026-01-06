@@ -33,36 +33,20 @@ impl ScreenshotManager {
     }
 
     pub fn capture_screenshot_for_running_game(&self) -> Result<Screenshot, Box<dyn std::error::Error>> {
-        println!("capture_screenshot_for_running_game called");
         let games = self.db.get_games()?;
-        println!("Found {} games", games.len());
         
         let running_game = games.iter()
             .find(|game| {
-                if let Some(exe_path) = &game.exe_path {
-                    println!("Checking game: {} with exe: {}", game.name, exe_path);
-                    let found = find_window_rect_for_exe(exe_path).is_some();
-                    if found {
-                        println!("Found running window for game: {}", game.name);
-                    }
-                    found
-                } else {
-                    println!("Game {} has no exe_path", game.name);
-                    false
-                }
+                game.exe_path.as_ref()
+                    .map(|exe_path| find_window_rect_for_exe(exe_path).is_some())
+                    .unwrap_or(false)
             })
-            .ok_or_else(|| {
-                let msg = format!("No running game found. Checked {} games.", games.len());
-                println!("{}", msg);
-                msg
-            })?;
+            .ok_or_else(|| format!("No running game found. Checked {} games.", games.len()))?;
 
-        println!("Capturing screenshot for game: {}", running_game.name);
         self.capture_screenshot(&running_game.id)
     }
 
     pub fn capture_screenshot(&self, game_id: &str) -> Result<Screenshot, Box<dyn std::error::Error>> {
-        println!("capture_screenshot called for game_id: {}", game_id);
         let games = self.db.get_games()?;
         let game = games.iter()
             .find(|g| g.id == game_id)
@@ -71,13 +55,8 @@ impl ScreenshotManager {
         let exe_path = game.exe_path.as_ref()
             .ok_or("Game exe_path not set")?;
 
-        println!("Looking for window for exe: {}", exe_path);
-        let window_rect = find_window_rect_for_exe(exe_path);
-        if window_rect.is_none() {
-            return Err(format!("Game window not found for: {}", exe_path).into());
-        }
-        let rect = window_rect.unwrap();
-        println!("Found window rect: ({}, {}, {}, {})", rect.0, rect.1, rect.2, rect.3);
+        let rect = find_window_rect_for_exe(exe_path)
+            .ok_or_else(|| format!("Game window not found for: {}", exe_path))?;
 
         let screens = Screen::all()?;
         let primary_screen = screens.first().ok_or("No screen found")?;
@@ -100,8 +79,6 @@ impl ScreenshotManager {
         image_buffer.save(&temp_path)?;
 
         let full_image = image::open(&temp_path)?;
-        println!("Full image size: {}x{}", full_image.width(), full_image.height());
-        println!("Origin: ({}, {})", origin_x, origin_y);
         
         let (mut left, mut top, mut right, mut bottom) = (
             rect.0 - origin_x,
@@ -109,7 +86,6 @@ impl ScreenshotManager {
             rect.2 - origin_x,
             rect.3 - origin_y,
         );
-        println!("Cropped rect before clamping: ({}, {}, {}, {})", left, top, right, bottom);
         left = left.max(0);
         top = top.max(0);
         right = right.min(full_image.width() as i32);
@@ -132,9 +108,12 @@ impl ScreenshotManager {
 
         let _ = fs::remove_file(&temp_path);
 
+        let default_name = format!("截图 {}", now_utc.format("%Y-%m-%d %H:%M:%S"));
+        
         let screenshot = Screenshot {
             id: Uuid::new_v4().to_string(),
             game_id: game_id.to_string(),
+            name: default_name,
             image_path: screenshot_path.to_string_lossy().to_string(),
             note: None,
             created_at: now_utc.to_rfc3339(),

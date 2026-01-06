@@ -29,6 +29,7 @@ pub struct Snapshot {
 pub struct Screenshot {
     pub id: String,
     pub game_id: String,
+    pub name: String,
     pub image_path: String,
     pub note: Option<String>,
     pub created_at: String,
@@ -40,12 +41,14 @@ pub struct Database {
 
 impl Database {
     pub fn new(app_handle: &tauri::AppHandle) -> Self {
-        let app_data_dir = app_handle.path().app_data_dir().expect("failed to get app data dir");
-        std::fs::create_dir_all(&app_data_dir).expect("failed to create app data dir");
+        let app_data_dir = app_handle.path().app_data_dir()
+            .unwrap_or_else(|e| panic!("无法获取应用数据目录: {}", e));
+        std::fs::create_dir_all(&app_data_dir)
+            .unwrap_or_else(|e| panic!("无法创建应用数据目录: {}", e));
         let db_path = app_data_dir.join("vn_saves.db");
         
         let db = Self { db_path };
-        db.init().expect("failed to init db");
+        db.init().unwrap_or_else(|e| panic!("数据库初始化失败: {}", e));
         db
     }
 
@@ -153,17 +156,68 @@ impl Database {
             )?;
         }
 
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS screenshots (
-                id TEXT PRIMARY KEY,
-                game_id TEXT NOT NULL,
-                image_path TEXT NOT NULL,
-                note TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(game_id) REFERENCES games(id)
-            )",
-            [],
-        )?;
+        let screenshots_table_exists = conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='screenshots'")?.exists([])?;
+        
+        if screenshots_table_exists {
+            let columns = conn.prepare("PRAGMA table_info(screenshots)")?
+                .query_map([], |row| {
+                    let name: String = row.get(1)?;
+                    Ok(name)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            
+            let has_name = columns.contains(&"name".to_string());
+            
+            if !has_name {
+                conn.execute(
+                    "CREATE TABLE screenshots_new (
+                        id TEXT PRIMARY KEY,
+                        game_id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        image_path TEXT NOT NULL,
+                        note TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(game_id) REFERENCES games(id)
+                    )",
+                    [],
+                )?;
+                
+                conn.execute(
+                    "INSERT INTO screenshots_new (id, game_id, name, image_path, note, created_at)
+                     SELECT id, game_id, COALESCE('截图 ' || strftime('%Y-%m-%d %H:%M:%S', created_at), '截图'), image_path, note, created_at FROM screenshots",
+                    [],
+                )?;
+                
+                conn.execute("DROP TABLE screenshots", [])?;
+                conn.execute("ALTER TABLE screenshots_new RENAME TO screenshots", [])?;
+            } else {
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS screenshots (
+                        id TEXT PRIMARY KEY,
+                        game_id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        image_path TEXT NOT NULL,
+                        note TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(game_id) REFERENCES games(id)
+                    )",
+                    [],
+                )?;
+            }
+        } else {
+            conn.execute(
+                "CREATE TABLE screenshots (
+                    id TEXT PRIMARY KEY,
+                    game_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    image_path TEXT NOT NULL,
+                    note TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(game_id) REFERENCES games(id)
+                )",
+                [],
+            )?;
+        }
 
         Ok(())
     }
@@ -276,14 +330,15 @@ impl Database {
 
     pub fn get_screenshot(&self, screenshot_id: &str) -> Result<Screenshot> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT id, game_id, image_path, note, created_at FROM screenshots WHERE id = ?1")?;
+        let mut stmt = conn.prepare("SELECT id, game_id, name, image_path, note, created_at FROM screenshots WHERE id = ?1")?;
         let screenshot = stmt.query_row([screenshot_id], |row| {
             Ok(Screenshot {
                 id: row.get(0)?,
                 game_id: row.get(1)?,
-                image_path: row.get(2)?,
-                note: row.get(3)?,
-                created_at: row.get(4)?,
+                name: row.get(2)?,
+                image_path: row.get(3)?,
+                note: row.get(4)?,
+                created_at: row.get(5)?,
             })
         })?;
         Ok(screenshot)
@@ -361,11 +416,12 @@ impl Database {
     pub fn add_screenshot(&self, screenshot: &Screenshot) -> Result<()> {
         let conn = self.connect()?;
         conn.execute(
-            "INSERT INTO screenshots (id, game_id, image_path, note, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO screenshots (id, game_id, name, image_path, note, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 screenshot.id,
                 screenshot.game_id,
+                screenshot.name,
                 screenshot.image_path,
                 screenshot.note,
                 screenshot.created_at
@@ -376,14 +432,15 @@ impl Database {
 
     pub fn get_screenshots(&self, game_id: &str) -> Result<Vec<Screenshot>> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT id, game_id, image_path, note, created_at FROM screenshots WHERE game_id = ?1 ORDER BY created_at DESC")?;
+        let mut stmt = conn.prepare("SELECT id, game_id, name, image_path, note, created_at FROM screenshots WHERE game_id = ?1 ORDER BY created_at DESC")?;
         let screenshot_iter = stmt.query_map([game_id], |row| {
             Ok(Screenshot {
                 id: row.get(0)?,
                 game_id: row.get(1)?,
-                image_path: row.get(2)?,
-                note: row.get(3)?,
-                created_at: row.get(4)?,
+                name: row.get(2)?,
+                image_path: row.get(3)?,
+                note: row.get(4)?,
+                created_at: row.get(5)?,
             })
         })?;
 
@@ -399,6 +456,15 @@ impl Database {
         conn.execute(
             "UPDATE screenshots SET note = ?1 WHERE id = ?2",
             params![note, screenshot_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_screenshot_name(&self, screenshot_id: &str, name: &str) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE screenshots SET name = ?1 WHERE id = ?2",
+            params![name, screenshot_id],
         )?;
         Ok(())
     }

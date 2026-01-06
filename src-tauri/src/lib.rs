@@ -47,9 +47,61 @@ fn add_game(
     let exe_path_obj = Path::new(&exe_path);
     let game_folder_path = exe_path_obj
         .parent()
-        .unwrap_or_else(|| Path::new(&save_folder_path))
+        .ok_or_else(|| "无法获取游戏执行文件的父目录".to_string())?
         .to_string_lossy()
         .to_string();
+    
+    if !Path::new(&save_folder_path).exists() {
+        return Err(format!("存档文件夹不存在: {}", save_folder_path));
+    }
+    if !Path::new(&exe_path).exists() {
+        return Err(format!("游戏执行文件不存在: {}", exe_path));
+    }
+    
+    let existing_games = state.db.get_games().map_err(|e| e.to_string())?;
+    
+    // Check for duplicate name
+    if existing_games.iter().any(|g| g.name == name) {
+        return Err(format!("游戏名称 \"{}\" 已存在", name));
+    }
+    
+    // Check for duplicate exe_path
+    let normalized_exe = Path::new(&exe_path).canonicalize()
+        .map_err(|_| format!("无法规范化路径: {}", exe_path))?
+        .to_string_lossy().to_string();
+    
+    if let Some(dup_game) = existing_games.iter().find(|g| {
+        if let Some(ref existing_exe) = g.exe_path {
+            if let Ok(existing_normalized) = Path::new(existing_exe).canonicalize() {
+                existing_normalized.to_string_lossy() == normalized_exe
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }) {
+        return Err(format!("游戏执行文件已被游戏 \"{}\" 使用", dup_game.name));
+    }
+    
+    // Check for duplicate save_folder_path
+    let normalized_save = Path::new(&save_folder_path).canonicalize()
+        .map_err(|_| format!("无法规范化路径: {}", save_folder_path))?
+        .to_string_lossy().to_string();
+    
+    if let Some(dup_game) = existing_games.iter().find(|g| {
+        if let Some(ref existing_save) = g.save_folder_path {
+            if let Ok(existing_normalized) = Path::new(existing_save).canonicalize() {
+                existing_normalized.to_string_lossy() == normalized_save
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }) {
+        return Err(format!("存档文件夹已被游戏 \"{}\" 使用", dup_game.name));
+    }
 
     let visual_logger_path = Path::new(&game_folder_path).join("visual-logger");
     let screenshots_dir = visual_logger_path.join("screenshots");
@@ -138,7 +190,29 @@ fn delete_snapshot(state: State<AppState>, snapshot_id: String) -> Result<(), St
 }
 
 #[tauri::command]
-fn restore_snapshot(_state: State<AppState>, _snapshot_id: String, _target_slot_path: Option<String>) -> Result<(), String> {
+fn restore_snapshot(state: State<AppState>, snapshot_id: String) -> Result<(), String> {
+    use std::fs;
+    
+    let snapshot = state.db.get_snapshot(&snapshot_id).map_err(|e| e.to_string())?;
+    
+    let backup_path = std::path::Path::new(&snapshot.backup_save_path);
+    let original_path = std::path::Path::new(&snapshot.original_save_path);
+    
+    if !backup_path.exists() {
+        return Err(format!("备份文件不存在: {}", snapshot.backup_save_path));
+    }
+    
+    if backup_path.is_dir() {
+        return Err("备份路径是目录，无法恢复。请确保备份路径是文件。".to_string());
+    }
+    
+    if let Some(parent) = original_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("无法创建目标目录: {}", e))?;
+    }
+    
+    fs::copy(backup_path, original_path)
+        .map_err(|e| format!("无法复制备份文件到原始路径: {}", e))?;
+    
     Ok(())
 }
 
@@ -163,6 +237,11 @@ fn update_screenshot_note(state: State<AppState>, screenshot_id: String, note: S
 }
 
 #[tauri::command]
+fn update_screenshot_name(state: State<AppState>, screenshot_id: String, name: String) -> Result<(), String> {
+    state.db.update_screenshot_name(&screenshot_id, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn delete_screenshot(state: State<AppState>, screenshot_id: String) -> Result<(), String> {
     use std::fs;
     
@@ -176,6 +255,83 @@ fn delete_screenshot(state: State<AppState>, screenshot_id: String) -> Result<()
     let image_path = std::path::Path::new(&screenshot.image_path);
     if image_path.exists() {
         fs::remove_file(image_path).map_err(|e| format!("Failed to delete screenshot file: {}", e))?;
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_delete_snapshots(state: State<AppState>, snapshot_ids: Vec<String>) -> Result<(), String> {
+    use std::fs;
+    
+    let mut errors = Vec::new();
+    
+    for snapshot_id in snapshot_ids {
+        match state.db.get_snapshot(&snapshot_id) {
+            Ok(snapshot) => {
+                // Delete from database
+                if let Err(e) = state.db.delete_snapshot(&snapshot_id) {
+                    errors.push(format!("删除快照 {} 失败: {}", snapshot.name, e));
+                    continue;
+                }
+                
+                // Delete backup directory
+                let backup_path = std::path::Path::new(&snapshot.backup_save_path);
+                if backup_path.exists() {
+                    let result = if backup_path.is_dir() {
+                        fs::remove_dir_all(backup_path)
+                    } else {
+                        fs::remove_file(backup_path).map(|_| ())
+                    };
+                    if let Err(e) = result {
+                        errors.push(format!("删除快照 {} 的备份文件失败: {}", snapshot.name, e));
+                    }
+                }
+            },
+            Err(e) => {
+                errors.push(format!("获取快照失败: {}", e));
+            }
+        }
+    }
+    
+    if !errors.is_empty() {
+        return Err(format!("批量删除完成，但有一些错误:\n{}", errors.join("\n")));
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_delete_screenshots(state: State<AppState>, screenshot_ids: Vec<String>) -> Result<(), String> {
+    use std::fs;
+    
+    let mut errors = Vec::new();
+    
+    for screenshot_id in screenshot_ids {
+        match state.db.get_screenshot(&screenshot_id) {
+            Ok(screenshot) => {
+                // Delete from database
+                if let Err(e) = state.db.delete_screenshot(&screenshot_id) {
+                    errors.push(format!("删除截图失败: {}", e));
+                    continue;
+                }
+                
+                // Delete image file
+                let image_path = std::path::Path::new(&screenshot.image_path);
+                if image_path.exists() {
+                    if let Err(e) = fs::remove_file(image_path) {
+                        errors.push(format!("删除截图文件失败: {}", e));
+                    }
+                }
+            },
+            Err(e) => {
+                errors.push(format!("获取截图失败: {}", e));
+            }
+        }
+    }
+    
+    if !errors.is_empty() {
+        return Err(format!("批量删除完成，但有一些错误:\n{}", errors.join("\n")));
     }
     
     Ok(())
@@ -201,7 +357,9 @@ pub fn run() {
                         .save_folder_path
                         .as_deref()
                         .unwrap_or(&game.game_folder_path);
-                    let _ = save_watcher.watch(watch_path);
+                    if let Err(e) = save_watcher.watch(watch_path) {
+                                        // Failed to watch game folder
+                    }
                 }
             }
 
@@ -222,36 +380,30 @@ pub fn run() {
                                     let should_process = {
                                         match last_snapshot_time_clone.lock() {
                                             Ok(last_time) => last_time.elapsed() >= debounce_duration,
-                                            Err(e) => {
-                                                eprintln!("Failed to lock last_snapshot_time: {}", e);
-                                                continue;
-                                            }
+                                            Err(_) => continue,
                                         }
                                     };
                                     
                                     if !should_process {
-                                        println!("Skipping event, too soon after last snapshot: {:?}", event.paths);
                                         continue;
                                     }
-
-                                    println!("Detected change in: {:?}", event.paths);
                                     
                                     if let Some(path) = event.paths.first() {
                                         match sm_clone.lock() {
                                             Ok(sm) => {
                                                 match sm.process_save_event(path, last_snapshot_time_clone.clone()) {
                                                     Ok(_) => {},
-                                                    Err(e) => eprintln!("Failed to process save event: {}", e),
+                                                    Err(_) => {},
                                                 }
                                             },
-                                            Err(e) => eprintln!("Failed to lock snapshot_manager: {}", e),
+                                            Err(_) => {},
                                         }
                                     }
                                 },
                                 _ => {}
                             }
                         },
-                        Err(e) => eprintln!("Watch error: {:?}", e),
+                        Err(_) => {},
                     }
                 }
             });
@@ -261,8 +413,6 @@ pub fn run() {
                 let manager = GlobalHotKeyManager::new().map_err(|e| format!("Failed to create hotkey manager: {}", e))?;
                 let hotkey = HotKey::new(None, Code::F11);
                 manager.register(hotkey.clone()).map_err(|e| format!("Failed to register F11 hotkey: {}", e))?;
-                
-                println!("F11 hotkey registered successfully");
                 
                 let hotkey_id = hotkey.id();
                 let screenshot_manager_for_hotkey = screenshot_manager.clone();
@@ -274,15 +424,12 @@ pub fn run() {
                 std::thread::spawn(move || {
                     use global_hotkey::GlobalHotKeyEvent;
                     
-                    println!("Hotkey event listener thread started");
-                    
                     let receiver = GlobalHotKeyEvent::receiver();
                     
                     loop {
                         // Use blocking recv to process one event at a time
                         match receiver.recv() {
                             Ok(event) => {
-                                println!("Received hotkey event: id={:?}", event.id);
                                 if event.id == hotkey_id {
                                     // CRITICAL: Check flag FIRST before processing
                                     // This prevents race conditions where multiple events are queued
@@ -290,19 +437,14 @@ pub fn run() {
                                         match (last_screenshot_time.lock(), is_capturing.lock()) {
                                             (Ok(last_time), Ok(capturing)) => {
                                                 if *capturing {
-                                                    println!("Screenshot already in progress, dropping this event");
                                                     false
                                                 } else if last_time.elapsed() < debounce_duration {
-                                                    println!("Screenshot debounce active (elapsed: {:?}, required: {:?}), dropping this event", last_time.elapsed(), debounce_duration);
                                                     false
                                                 } else {
                                                     true
                                                 }
                                             },
-                                            _ => {
-                                                eprintln!("Failed to lock mutexes");
-                                                false
-                                            },
+                                            _ => false,
                                         }
                                     };
                                     
@@ -315,73 +457,51 @@ pub fn run() {
                                     let should_capture = {
                                         match (last_screenshot_time.lock(), is_capturing.lock()) {
                                             (Ok(mut last_time), Ok(mut capturing)) => {
-                                                // Double-check in case another thread set it (shouldn't happen but be safe)
                                                 if *capturing {
-                                                    println!("Screenshot flag was set while we were checking, dropping event");
                                                     false
                                                 } else {
                                                     *last_time = std::time::Instant::now();
                                                     *capturing = true;
-                                                    println!("Starting screenshot capture... (is_capturing set to true)");
                                                     true
                                                 }
                                             },
-                                            _ => {
-                                                eprintln!("Failed to lock mutexes for setting flags");
-                                                false
-                                            },
+                                            _ => false,
                                         }
                                     };
                                     
                                     if should_capture {
-                                        // Drain any additional pending events for the same hotkey IMMEDIATELY
-                                        let mut duplicate_count = 0;
                                         while let Ok(next_event) = receiver.try_recv() {
                                             if next_event.id == hotkey_id {
-                                                duplicate_count += 1;
-                                                println!("Dropping duplicate hotkey event #{}", duplicate_count);
+                                                // Drop duplicate events
                                             }
                                         }
-                                        
-                                        println!("F11 pressed, capturing screenshot...");
                                         let is_capturing_clone = is_capturing.clone();
                                         match screenshot_manager_for_hotkey.lock() {
                                             Ok(sm) => {
                                                 match sm.capture_screenshot_for_running_game() {
                                                     Ok(screenshot) => {
-                                                        println!("Screenshot captured successfully: {}", screenshot.image_path);
                                                         let _ = app_handle_for_hotkey.emit("screenshot-created", &screenshot);
-                                                        // Reset flag AFTER screenshot is complete
                                                         if let Ok(mut capturing) = is_capturing_clone.lock() {
                                                             *capturing = false;
-                                                            println!("Screenshot complete, is_capturing reset to false");
                                                         }
                                                     },
-                                                    Err(e) => {
-                                                        eprintln!("Failed to capture screenshot: {}", e);
-                                                        eprintln!("Error details: {:?}", e);
+                                                    Err(_) => {
                                                         if let Ok(mut capturing) = is_capturing_clone.lock() {
                                                             *capturing = false;
-                                                            println!("Screenshot failed, is_capturing reset to false");
                                                         }
                                                     },
                                                 }
                                             },
-                                            Err(e) => {
-                                                eprintln!("Failed to lock screenshot_manager: {}", e);
+                                            Err(_) => {
                                                 if let Ok(mut capturing) = is_capturing_clone.lock() {
                                                     *capturing = false;
-                                                    println!("Lock failed, is_capturing reset to false");
                                                 }
                                             },
                                         }
                                     }
                                 }
                             },
-                            Err(e) => {
-                                eprintln!("Hotkey event receiver error: {:?}", e);
-                                break;
-                            }
+                            Err(_) => break,
                         }
                     }
                 });
@@ -408,7 +528,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+            .invoke_handler(tauri::generate_handler![
             add_game,
             get_games,
             get_snapshots,
@@ -421,9 +541,15 @@ pub fn run() {
             capture_screenshot,
             get_screenshots,
             update_screenshot_note,
+            update_screenshot_name,
             delete_screenshot,
-            load_screenshot_image_base64
+            load_screenshot_image_base64,
+            batch_delete_snapshots,
+            batch_delete_screenshots
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            eprintln!("应用运行错误: {}", e);
+            std::process::exit(1);
+        });
 }
