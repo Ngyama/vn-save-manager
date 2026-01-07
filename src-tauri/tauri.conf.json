@@ -13,13 +13,11 @@
     "windows": [
       {
         "title": "vn-save-manager",
-        "width": 1200,
-        "height": 800,
-        "resizable": false,
-        "minWidth": 1200,
+        "width": 1500,
+        "height": 900,
+        "resizable": true,
+        "minWidth": 1400,
         "minHeight": 800,
-        "maxWidth": 1200,
-        "maxHeight": 800,
         "devtools": true
       }
     ],

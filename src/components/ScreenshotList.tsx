@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { Screenshot } from "../types";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 interface ScreenshotListProps {
   gameName: string;
@@ -25,6 +26,7 @@ export default function ScreenshotList({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBatchMode, setIsBatchMode] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>("");
 
@@ -119,10 +121,49 @@ export default function ScreenshotList({
     }
   }
 
+  async function handleBatchExport() {
+    if (selectedIds.size === 0) {
+      alert("请选择要导出的截图");
+      return;
+    }
+
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "选择导出目录",
+      });
+
+      if (!selected || typeof selected !== "string") {
+        return;
+      }
+
+      setIsExporting(true);
+      const exportedCount = await invoke<number>("batch_export_screenshots", {
+        screenshotIds: Array.from(selectedIds),
+        exportDir: selected,
+      });
+
+      alert(`成功导出 ${exportedCount} 张截图到:\n${selected}`);
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      alert("批量导出失败: " + errorMsg);
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="p-5 border-b border-gray-200 bg-white">
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">{gameName} - 截图</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-xl font-semibold text-gray-900">{gameName} - 截图</h2>
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-gray-600">
+              <span className="font-medium text-blue-600">{screenshots.length}</span> 张截图
+            </span>
+          </div>
+        </div>
         <p className="text-sm text-gray-500 mb-3">按 F11 键截取游戏窗口</p>
         <div className="flex gap-2 mb-3">
           <input
@@ -155,6 +196,13 @@ export default function ScreenshotList({
                   className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   {selectedIds.size === filteredScreenshots.length ? "取消全选" : "全选"}
+                </button>
+                <button
+                  onClick={handleBatchExport}
+                  disabled={selectedIds.size === 0 || isExporting}
+                  className="px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-colors"
+                >
+                  {isExporting ? `导出中 (${selectedIds.size})...` : `导出选中 (${selectedIds.size})`}
                 </button>
                 <button
                   onClick={handleBatchDelete}

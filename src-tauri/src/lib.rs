@@ -132,6 +132,30 @@ fn get_games(state: State<AppState>) -> Result<Vec<Game>, String> {
 }
 
 #[tauri::command]
+fn get_game_stats(state: State<AppState>, game_id: String) -> Result<(usize, usize), String> {
+    use rusqlite::params;
+    let conn = state.db.connect().map_err(|e| e.to_string())?;
+    
+    let snapshot_count: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM snapshots WHERE game_id = ?1",
+            params![game_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    
+    let screenshot_count: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM screenshots WHERE game_id = ?1",
+            params![game_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    
+    Ok((snapshot_count, screenshot_count))
+}
+
+#[tauri::command]
 fn get_snapshots(state: State<AppState>, game_id: String) -> Result<Vec<Snapshot>, String> {
     state.db.get_snapshots(&game_id).map_err(|e| e.to_string())
 }
@@ -337,6 +361,101 @@ fn batch_delete_screenshots(state: State<AppState>, screenshot_ids: Vec<String>)
     Ok(())
 }
 
+#[tauri::command]
+fn batch_export_screenshots(state: State<AppState>, screenshot_ids: Vec<String>, export_dir: String) -> Result<usize, String> {
+    use std::fs;
+    use std::path::Path;
+    
+    let export_path = Path::new(&export_dir);
+    if !export_path.exists() {
+        return Err(format!("导出目录不存在: {}", export_dir));
+    }
+    if !export_path.is_dir() {
+        return Err(format!("导出路径不是目录: {}", export_dir));
+    }
+    
+    let mut exported_count = 0;
+    let mut errors = Vec::new();
+    
+    for screenshot_id in screenshot_ids {
+        match state.db.get_screenshot(&screenshot_id) {
+            Ok(screenshot) => {
+                let source_path = Path::new(&screenshot.image_path);
+                if !source_path.exists() {
+                    errors.push(format!("截图文件不存在: {}", screenshot.name));
+                    continue;
+                }
+                
+                // Generate export filename from screenshot name or use original filename
+                let source_filename = source_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("screenshot.png");
+                
+                // Sanitize filename: remove invalid characters
+                let safe_name = screenshot.name
+                    .chars()
+                    .map(|c| if ":<>\"|?*\\/".contains(c) { '_' } else { c })
+                    .collect::<String>();
+                
+                // Try to preserve original extension
+                let extension = source_path.extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("png");
+                
+                let export_filename = if safe_name.trim().is_empty() {
+                    source_filename.to_string()
+                } else {
+                    format!("{}.{}", safe_name.trim(), extension)
+                };
+                
+                let dest_path = export_path.join(&export_filename);
+                
+                // Handle duplicate filenames
+                let mut final_dest_path = dest_path.clone();
+                let mut counter = 1;
+                while final_dest_path.exists() {
+                    let stem = Path::new(&export_filename)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("screenshot");
+                    let ext = Path::new(&export_filename)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("png");
+                    final_dest_path = export_path.join(format!("{} ({}).{}", stem, counter, ext));
+                    counter += 1;
+                }
+                
+                match fs::copy(source_path, &final_dest_path) {
+                    Ok(_) => {
+                        exported_count += 1;
+                    },
+                    Err(e) => {
+                        errors.push(format!("导出截图 {} 失败: {}", screenshot.name, e));
+                    }
+                }
+            },
+            Err(e) => {
+                errors.push(format!("获取截图失败: {}", e));
+            }
+        }
+    }
+    
+    if exported_count == 0 && !errors.is_empty() {
+        return Err(format!("导出失败:\n{}", errors.join("\n")));
+    }
+    
+    if !errors.is_empty() {
+        return Err(format!("成功导出 {} 张截图，但有 {} 个错误:\n{}", 
+            exported_count, 
+            errors.len(),
+            errors.join("\n")
+        ));
+    }
+    
+    Ok(exported_count)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -531,6 +650,7 @@ pub fn run() {
             .invoke_handler(tauri::generate_handler![
             add_game,
             get_games,
+            get_game_stats,
             get_snapshots,
             restore_snapshot,
             delete_game,
@@ -545,7 +665,8 @@ pub fn run() {
             delete_screenshot,
             load_screenshot_image_base64,
             batch_delete_snapshots,
-            batch_delete_screenshots
+            batch_delete_screenshots,
+            batch_export_screenshots
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

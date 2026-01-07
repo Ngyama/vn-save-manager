@@ -52,7 +52,7 @@ impl Database {
         db
     }
 
-    fn connect(&self) -> Result<Connection> {
+    pub fn connect(&self) -> Result<Connection> {
         Connection::open(&self.db_path)
     }
 

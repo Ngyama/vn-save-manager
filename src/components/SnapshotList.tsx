@@ -122,7 +122,14 @@ export default function SnapshotList({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="p-5 border-b border-gray-200 bg-white">
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">{gameName}</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-xl font-semibold text-gray-900">{gameName}</h2>
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-gray-600">
+              <span className="font-medium text-blue-600">{snapshots.length}</span> 个快照
+            </span>
+          </div>
+        </div>
         <p className="text-sm text-gray-500 mb-3">游戏目录: {gameFolderPath}</p>
         <div className="flex gap-2 mb-3">
           <input

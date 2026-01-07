@@ -361,7 +361,7 @@ function App() {
       />
 
       {selectedGame ? (
-        <div className="w-96 bg-white border-r border-gray-200 flex flex-col h-screen flex-shrink-0">
+        <div className="w-[550px] bg-white border-r border-gray-200 flex flex-col h-screen flex-shrink-0">
           <div className="flex border-b border-gray-200 bg-gray-50/50">
             <button
               className={`flex-1 py-3 px-4 text-sm font-medium transition-colors relative ${
