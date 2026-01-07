@@ -386,18 +386,15 @@ fn batch_export_screenshots(state: State<AppState>, screenshot_ids: Vec<String>,
                     continue;
                 }
                 
-                // Generate export filename from screenshot name or use original filename
                 let source_filename = source_path.file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("screenshot.png");
                 
-                // Sanitize filename: remove invalid characters
                 let safe_name = screenshot.name
                     .chars()
                     .map(|c| if ":<>\"|?*\\/".contains(c) { '_' } else { c })
                     .collect::<String>();
                 
-                // Try to preserve original extension
                 let extension = source_path.extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("png");
@@ -410,7 +407,6 @@ fn batch_export_screenshots(state: State<AppState>, screenshot_ids: Vec<String>,
                 
                 let dest_path = export_path.join(&export_filename);
                 
-                // Handle duplicate filenames
                 let mut final_dest_path = dest_path.clone();
                 let mut counter = 1;
                 while final_dest_path.exists() {
@@ -454,6 +450,138 @@ fn batch_export_screenshots(state: State<AppState>, screenshot_ids: Vec<String>,
     }
     
     Ok(exported_count)
+}
+
+#[tauri::command]
+fn export_screenshots_to_markdown(state: State<AppState>, screenshot_ids: Vec<String>) -> Result<String, String> {
+    use std::fs;
+    use std::path::Path;
+    use chrono::NaiveDateTime;
+    
+    if screenshot_ids.is_empty() {
+        return Err("请至少选择一张截图".to_string());
+    }
+    
+    // Get first screenshot to determine game_id
+    let first_screenshot = state.db.get_screenshot(&screenshot_ids[0])
+        .map_err(|e| format!("获取截图信息失败: {}", e))?;
+    let game_id = first_screenshot.game_id;
+    
+    // Get game info to find game_folder_path
+    let game = state.db.get_game(&game_id)
+        .map_err(|e| format!("获取游戏信息失败: {}", e))?;
+    
+    // Create exports directory structure
+    let exports_dir = Path::new(&game.game_folder_path)
+        .join("visual-logger")
+        .join("exports");
+    let images_dir = exports_dir.join("images");
+    
+    fs::create_dir_all(&images_dir)
+        .map_err(|e| format!("创建导出目录失败: {}", e))?;
+    
+    // Get all screenshots and sort by created_at (ascending - oldest first)
+    let mut screenshots = Vec::new();
+    for screenshot_id in screenshot_ids {
+        match state.db.get_screenshot(&screenshot_id) {
+            Ok(screenshot) => {
+                if screenshot.game_id != game_id {
+                    return Err(format!("截图 {} 不属于当前游戏", screenshot.name));
+                }
+                screenshots.push(screenshot);
+            },
+            Err(e) => {
+                return Err(format!("获取截图信息失败: {}", e));
+            }
+        }
+    }
+    
+    // Sort by created_at ascending (oldest first)
+    screenshots.sort_by(|a, b| {
+        // Direct string comparison works for ISO 8601 format
+        a.created_at.cmp(&b.created_at)
+    });
+    
+    // Generate markdown content
+    let mut markdown_lines = Vec::new();
+    
+    for screenshot in &screenshots {
+        // Parse timestamp for display
+        let display_time = NaiveDateTime::parse_from_str(&screenshot.created_at, "%Y-%m-%dT%H:%M:%S%.fZ")
+            .or_else(|_| NaiveDateTime::parse_from_str(&screenshot.created_at, "%Y-%m-%d %H:%M:%S"))
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|_| screenshot.created_at.clone());
+        
+        // Copy image file
+        let source_path = Path::new(&screenshot.image_path);
+        if !source_path.exists() {
+            continue; // Skip missing images
+        }
+        
+        let source_filename = source_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("screenshot.png");
+        
+        // Use original filename in images directory
+        let image_filename = source_filename;
+        let image_dest_path = images_dir.join(image_filename);
+        
+        // Handle duplicate filenames
+        let mut final_image_path = image_dest_path.clone();
+        let mut counter = 1;
+        while final_image_path.exists() {
+            let stem = Path::new(image_filename)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("screenshot");
+            let ext = Path::new(image_filename)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png");
+            final_image_path = images_dir.join(format!("{} ({}).{}", stem, counter, ext));
+            counter += 1;
+        }
+        
+        // Copy image
+        if let Err(e) = fs::copy(source_path, &final_image_path) {
+            return Err(format!("复制图片失败 {}: {}", screenshot.name, e));
+        }
+        
+        // Get relative image path for markdown
+        let relative_image_path = format!("./images/{}", final_image_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("screenshot.png"));
+        
+        // Add markdown content
+        markdown_lines.push(format!("## {}", display_time));
+        markdown_lines.push("".to_string());
+        markdown_lines.push(format!("### {}", screenshot.name));
+        markdown_lines.push("".to_string());
+        markdown_lines.push(format!("![{}]({})", screenshot.name, relative_image_path));
+        markdown_lines.push("".to_string());
+        
+        if let Some(note) = &screenshot.note {
+            if !note.trim().is_empty() {
+                markdown_lines.push(note.trim().to_string());
+                markdown_lines.push("".to_string());
+            }
+        }
+        
+        markdown_lines.push("---".to_string());
+        markdown_lines.push("".to_string());
+    }
+    
+    // Generate markdown filename with timestamp
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let markdown_filename = format!("screenshots_export_{}.md", timestamp);
+    let markdown_path = exports_dir.join(&markdown_filename);
+    
+    // Write markdown file
+    let markdown_content = markdown_lines.join("\n");
+    fs::write(&markdown_path, markdown_content)
+        .map_err(|e| format!("写入 Markdown 文件失败: {}", e))?;
+    
+    Ok(markdown_path.to_string_lossy().to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -666,7 +794,8 @@ pub fn run() {
             load_screenshot_image_base64,
             batch_delete_snapshots,
             batch_delete_screenshots,
-            batch_export_screenshots
+            batch_export_screenshots,
+            export_screenshots_to_markdown
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Screenshot } from "../types";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import Toast from "./Toast";
 
 interface ScreenshotListProps {
   gameName: string;
@@ -27,8 +28,10 @@ export default function ScreenshotList({
   const [isBatchMode, setIsBatchMode] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [isExportingMarkdown, setIsExportingMarkdown] = useState<boolean>(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>("");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
   const filteredScreenshots = useMemo(() => {
     if (!searchQuery.trim()) {
@@ -123,7 +126,7 @@ export default function ScreenshotList({
 
   async function handleBatchExport() {
     if (selectedIds.size === 0) {
-      alert("请选择要导出的截图");
+      setToast({ message: "请选择要导出的截图", type: "error" });
       return;
     }
 
@@ -144,18 +147,55 @@ export default function ScreenshotList({
         exportDir: selected,
       });
 
-      alert(`成功导出 ${exportedCount} 张截图到:\n${selected}`);
+      setToast({ 
+        message: `成功导出 ${exportedCount} 张截图`, 
+        type: "success" 
+      });
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      alert("批量导出失败: " + errorMsg);
+      setToast({ message: `批量导出失败: ${errorMsg}`, type: "error" });
     } finally {
       setIsExporting(false);
     }
   }
 
+  async function handleExportToMarkdown() {
+    if (selectedIds.size === 0) {
+      setToast({ message: "请选择要导出的截图", type: "error" });
+      return;
+    }
+
+    setIsExportingMarkdown(true);
+    try {
+      const markdownPath = await invoke<string>("export_screenshots_to_markdown", {
+        screenshotIds: Array.from(selectedIds),
+      });
+
+      setToast({ 
+        message: `成功导出 ${selectedIds.size} 张截图到 Markdown 文件`, 
+        type: "success" 
+      });
+      setSelectedIds(new Set());
+      setIsBatchMode(false);
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      setToast({ message: `导出 Markdown 失败: ${errorMsg}`, type: "error" });
+    } finally {
+      setIsExportingMarkdown(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="p-5 border-b border-gray-200 bg-white">
+    <>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+      <div className="flex flex-col h-full overflow-hidden">
+        <div className="p-5 border-b border-gray-200 bg-white">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-xl font-semibold text-gray-900">{gameName} - 截图</h2>
           <div className="flex items-center gap-4 text-sm">
@@ -198,6 +238,13 @@ export default function ScreenshotList({
                   {selectedIds.size === filteredScreenshots.length ? "取消全选" : "全选"}
                 </button>
                 <button
+                  onClick={handleExportToMarkdown}
+                  disabled={selectedIds.size === 0 || isExportingMarkdown}
+                  className="px-3 py-1.5 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-colors"
+                >
+                  {isExportingMarkdown ? `导出中 (${selectedIds.size})...` : `导出为 Markdown (${selectedIds.size})`}
+                </button>
+                <button
                   onClick={handleBatchExport}
                   disabled={selectedIds.size === 0 || isExporting}
                   className="px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-colors"
@@ -220,19 +267,19 @@ export default function ScreenshotList({
             </span>
           )}
         </div>
-      </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {filteredScreenshots.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-gray-400 text-base">
-              {searchQuery ? "没有找到匹配的截图" : "还没有截图。按 F11 键截取游戏窗口！"}
-            </p>
-          </div>
-        ) : (
-          filteredScreenshots.map((s) => (
-            <div
-              key={s.id}
-              className={`group relative p-4 rounded-xl transition-all duration-200 ${
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {filteredScreenshots.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-400 text-base">
+                {searchQuery ? "没有找到匹配的截图" : "还没有截图。按 F11 键截取游戏窗口！"}
+              </p>
+            </div>
+          ) : (
+            filteredScreenshots.map((s) => (
+              <div
+                key={s.id}
+                className={`group relative p-4 rounded-xl transition-all duration-200 ${
                 isBatchMode
                   ? selectedIds.has(s.id)
                     ? "bg-blue-50 border-2 border-blue-500 shadow-sm"
@@ -240,16 +287,16 @@ export default function ScreenshotList({
                   : selectedScreenshot?.id === s.id
                   ? "bg-blue-50 border-2 border-blue-200 shadow-sm cursor-pointer"
                   : "bg-white border-2 border-transparent hover:border-gray-200 hover:shadow-sm cursor-pointer"
-              }`}
-              onClick={() => {
-                if (isBatchMode) {
-                  handleToggleSelect(s.id);
-                } else {
-                  onSelectScreenshot(s);
-                }
-              }}
-            >
-              <div className="flex gap-4">
+                }`}
+                onClick={() => {
+                  if (isBatchMode) {
+                    handleToggleSelect(s.id);
+                  } else {
+                    onSelectScreenshot(s);
+                  }
+                }}
+              >
+                <div className="flex gap-4">
                 {isBatchMode && (
                   <input
                     type="checkbox"
@@ -328,11 +375,12 @@ export default function ScreenshotList({
                     {s.note?.substring(0, 50) || "点击编辑感想"}...
                   </p>
                 </div>
+                </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
+            ))
+          )}
+        </div>
     </div>
+    </>
   );
 }
