@@ -132,6 +132,133 @@ fn get_games(state: State<AppState>) -> Result<Vec<Game>, String> {
 }
 
 #[tauri::command]
+fn update_game(
+    _app_handle: tauri::AppHandle,
+    state: State<AppState>,
+    game_id: String,
+    name: Option<String>,
+    save_folder_path: Option<String>,
+    exe_path: Option<String>,
+) -> Result<(), String> {
+    use std::path::Path;
+    
+    // Get current game info
+    let current_game = state.db.get_game(&game_id).map_err(|e| e.to_string())?;
+    
+    // Determine new values
+    let new_name = name.as_ref().unwrap_or(&current_game.name);
+    let new_save_folder_path = save_folder_path.as_ref().or(current_game.save_folder_path.as_ref());
+    
+    // Validate paths if provided
+    if let Some(ref path) = save_folder_path {
+        if !Path::new(path).exists() {
+            return Err(format!("存档文件夹不存在: {}", path));
+        }
+    }
+    
+    if let Some(ref path) = exe_path {
+        if !Path::new(path).exists() {
+            return Err(format!("游戏执行文件不存在: {}", path));
+        }
+    }
+    
+    // Check for duplicate name (excluding current game)
+    if name.is_some() {
+        let existing_games = state.db.get_games().map_err(|e| e.to_string())?;
+        if existing_games.iter().any(|g| g.id != game_id && g.name == *new_name) {
+            return Err(format!("游戏名称 \"{}\" 已存在", new_name));
+        }
+    }
+    
+    // Check for duplicate exe_path (excluding current game)
+    if let Some(ref path) = exe_path {
+        let normalized_exe = Path::new(path).canonicalize()
+            .map_err(|_| format!("无法规范化路径: {}", path))?
+            .to_string_lossy().to_string();
+        
+        let existing_games = state.db.get_games().map_err(|e| e.to_string())?;
+        if let Some(dup_game) = existing_games.iter().find(|g| {
+            g.id != game_id && if let Some(ref existing_exe) = g.exe_path {
+                if let Ok(existing_normalized) = Path::new(existing_exe).canonicalize() {
+                    existing_normalized.to_string_lossy() == normalized_exe
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }) {
+            return Err(format!("游戏执行文件已被游戏 \"{}\" 使用", dup_game.name));
+        }
+    }
+    
+    // Check for duplicate save_folder_path (excluding current game)
+    if let Some(ref path) = save_folder_path {
+        let normalized_save = Path::new(path).canonicalize()
+            .map_err(|_| format!("无法规范化路径: {}", path))?
+            .to_string_lossy().to_string();
+        
+        let existing_games = state.db.get_games().map_err(|e| e.to_string())?;
+        if let Some(dup_game) = existing_games.iter().find(|g| {
+            g.id != game_id && if let Some(ref existing_save) = g.save_folder_path {
+                if let Ok(existing_normalized) = Path::new(existing_save).canonicalize() {
+                    existing_normalized.to_string_lossy() == normalized_save
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }) {
+            return Err(format!("存档文件夹已被游戏 \"{}\" 使用", dup_game.name));
+        }
+    }
+    
+    // Calculate new game_folder_path if exe_path changed
+    let new_game_folder_path = if let Some(ref path) = exe_path {
+        let exe_path_obj = Path::new(path);
+        Some(exe_path_obj
+            .parent()
+            .ok_or_else(|| "无法获取游戏执行文件的父目录".to_string())?
+            .to_string_lossy()
+            .to_string())
+    } else {
+        None
+    };
+    
+    // Update database
+    state.db.update_game(
+        &game_id,
+        name.as_deref(),
+        exe_path.as_deref(),
+        save_folder_path.as_deref(),
+        new_game_folder_path.as_deref(),
+    ).map_err(|e| e.to_string())?;
+    
+    // Update watcher if save_folder_path changed
+    if save_folder_path.is_some() {
+        // Unwatch old path
+        if let Some(ref old_path) = current_game.save_folder_path {
+            if let Err(_) = state.watcher.lock()
+                .map_err(|e| format!("Failed to lock watcher: {}", e))?
+                .unwatch(old_path) {
+                // Ignore error if path not watched
+            }
+        }
+        
+        // Watch new path
+        if let Some(ref new_path) = new_save_folder_path {
+            state.watcher.lock()
+                .map_err(|e| format!("Failed to lock watcher: {}", e))?
+                .watch(new_path)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
 fn get_game_stats(state: State<AppState>, game_id: String) -> Result<(usize, usize), String> {
     use rusqlite::params;
     let conn = state.db.connect().map_err(|e| e.to_string())?;
@@ -604,8 +731,8 @@ pub fn run() {
                         .save_folder_path
                         .as_deref()
                         .unwrap_or(&game.game_folder_path);
-                    if let Err(e) = save_watcher.watch(watch_path) {
-                                        // Failed to watch game folder
+                    if let Err(_e) = save_watcher.watch(watch_path) {
+                        // Failed to watch game folder
                     }
                 }
             }
@@ -777,6 +904,7 @@ pub fn run() {
         })
             .invoke_handler(tauri::generate_handler![
             add_game,
+            update_game,
             get_games,
             get_game_stats,
             get_snapshots,

@@ -344,6 +344,28 @@ impl Database {
         Ok(screenshot)
     }
 
+    pub fn update_game(&self, game_id: &str, name: Option<&str>, exe_path: Option<&str>, save_folder_path: Option<&str>, game_folder_path: Option<&str>) -> Result<()> {
+        let conn = self.connect()?;
+        
+        if let Some(name) = name {
+            conn.execute("UPDATE games SET name = ?1 WHERE id = ?2", params![name, game_id])?;
+        }
+        
+        if let Some(exe_path) = exe_path {
+            conn.execute("UPDATE games SET exe_path = ?1 WHERE id = ?2", params![exe_path, game_id])?;
+        }
+        
+        if let Some(save_folder_path) = save_folder_path {
+            conn.execute("UPDATE games SET save_folder_path = ?1 WHERE id = ?2", params![save_folder_path, game_id])?;
+        }
+        
+        if let Some(game_folder_path) = game_folder_path {
+            conn.execute("UPDATE games SET game_folder_path = ?1 WHERE id = ?2", params![game_folder_path, game_id])?;
+        }
+        
+        Ok(())
+    }
+
     pub fn get_game(&self, game_id: &str) -> Result<Game> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare("SELECT id, name, exe_path, game_folder_path, save_folder_path, cover_image FROM games WHERE id = ?1")?;

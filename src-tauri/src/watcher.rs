@@ -47,7 +47,7 @@ pub fn start_watcher_loop(rx: Receiver<notify::Result<Event>>, app_handle: AppHa
                             last_event_time = std::time::Instant::now();
 
 
-                            if let Err(e) = app_handle.emit("save-detected", event.paths) {
+                            if let Err(_e) = app_handle.emit("save-detected", event.paths) {
                                 // Failed to send event
                             }
                         },

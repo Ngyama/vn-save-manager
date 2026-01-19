@@ -32,19 +32,40 @@ export default function ScreenshotList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>("");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+  const [sortBy, setSortBy] = useState<"time-desc" | "time-asc" | "name-asc" | "name-desc">("time-desc");
 
   const filteredScreenshots = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return screenshots;
+    let filtered = screenshots;
+    
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((s) => 
+        s.name.toLowerCase().includes(query) ||
+        s.note?.toLowerCase().includes(query) ||
+        s.image_path.toLowerCase().includes(query) ||
+        new Date(s.created_at).toLocaleString().toLowerCase().includes(query)
+      );
     }
-    const query = searchQuery.toLowerCase();
-    return screenshots.filter((s) => 
-      s.name.toLowerCase().includes(query) ||
-      s.note?.toLowerCase().includes(query) ||
-      s.image_path.toLowerCase().includes(query) ||
-      new Date(s.created_at).toLocaleString().toLowerCase().includes(query)
-    );
-  }, [screenshots, searchQuery]);
+    
+    // Apply sorting
+    const sorted = [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case "time-desc":
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case "time-asc":
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case "name-asc":
+          return a.name.localeCompare(b.name);
+        case "name-desc":
+          return b.name.localeCompare(a.name);
+        default:
+          return 0;
+      }
+    });
+    
+    return sorted;
+  }, [screenshots, searchQuery, sortBy]);
 
   async function handleNameEditStart(screenshot: Screenshot) {
     setEditingId(screenshot.id);
@@ -213,6 +234,16 @@ export default function ScreenshotList({
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="time-desc">时间降序</option>
+            <option value="time-asc">时间升序</option>
+            <option value="name-asc">名称升序</option>
+            <option value="name-desc">名称降序</option>
+          </select>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

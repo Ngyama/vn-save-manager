@@ -7,6 +7,7 @@ interface GameListProps {
   selectedGame: Game | null;
   onSelectGame: (game: Game) => void;
   onDeleteGame: (game: Game) => void;
+  onEditGame: (game: Game) => void;
   onAddGame: () => void;
 }
 
@@ -20,6 +21,7 @@ export default function GameList({
   selectedGame,
   onSelectGame,
   onDeleteGame,
+  onEditGame,
   onAddGame,
 }: GameListProps) {
   const [gameStats, setGameStats] = useState<Record<string, GameStats>>({});
@@ -69,20 +71,32 @@ export default function GameList({
                 }`}>
                   {g.name}
                 </span>
-                <button
-                  className={`opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 ${
-                    selectedGame?.id === g.id ? "text-gray-400" : ""
-                  }`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteGame(g);
-                  }}
-                  title="删除游戏"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditGame(g);
+                    }}
+                    title="编辑游戏"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                  <button
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteGame(g);
+                    }}
+                    title="删除游戏"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
               <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500">
                 <span>{stats.snapshotCount} 个快照</span>

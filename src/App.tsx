@@ -5,6 +5,7 @@ import { Game, Snapshot, Screenshot } from "./types";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import AddGameModal from "./components/AddGameModal";
+import EditGameModal from "./components/EditGameModal";
 import GameList from "./components/GameList";
 import SnapshotList from "./components/SnapshotList";
 import SnapshotDetail from "./components/SnapshotDetail";
@@ -22,6 +23,8 @@ function App() {
   const [selectedScreenshot, setSelectedScreenshot] = useState<Screenshot | null>(null);
   const [activeTab, setActiveTab] = useState<"snapshots" | "screenshots">("snapshots");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editGame, setEditGame] = useState<Game | null>(null);
   const [savePath, setSavePath] = useState<string>("");
   const [exePath, setExePath] = useState<string>("");
   const [noteText, setNoteText] = useState<string>("");
@@ -298,6 +301,53 @@ function App() {
     setShowAddModal(true);
   }
 
+  function handleEditGame(game: Game) {
+    setEditGame(game);
+    setSavePath("");
+    setExePath("");
+    setShowEditModal(true);
+  }
+
+  async function handleUpdateGame(gameId: string, name: string, saveFolderPath: string | undefined, exeFilePath: string | undefined) {
+    try {
+      await invoke("update_game", {
+        gameId,
+        name,
+        saveFolderPath: saveFolderPath || null,
+        exePath: exeFilePath || null,
+      });
+      await loadGames();
+      
+      // Update selected game if it was edited
+      if (selectedGame?.id === gameId) {
+        const updatedGames = await invoke<Game[]>("get_games");
+        const updatedGame = updatedGames.find(g => g.id === gameId);
+        if (updatedGame) {
+          setSelectedGame(updatedGame);
+          // Reload snapshots and screenshots
+          const snaps = await invoke<Snapshot[]>("get_snapshots", { gameId });
+          setSnapshots(snaps);
+          const screens = await invoke<Screenshot[]>("get_screenshots", { gameId });
+          setScreenshots(screens);
+        }
+      }
+      
+      setShowEditModal(false);
+      setEditGame(null);
+      setSavePath("");
+      setExePath("");
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      if (errorMsg.includes("已存在")) {
+        alert(`更新游戏失败\n\n${errorMsg}\n\n请使用不同的游戏名称。`);
+      } else if (errorMsg.includes("不存在")) {
+        alert(`更新游戏失败\n\n${errorMsg}\n\n请确认路径是否正确。`);
+      } else {
+        alert(`更新游戏失败\n\n错误: ${errorMsg}`);
+      }
+    }
+  }
+
   async function browseSaveFolder() {
     try {
       const selected = await open({
@@ -357,6 +407,7 @@ function App() {
         selectedGame={selectedGame}
         onSelectGame={selectGame}
         onDeleteGame={handleDeleteGame}
+        onEditGame={handleEditGame}
         onAddGame={handleAddGameClick}
       />
 
@@ -497,6 +548,24 @@ function App() {
         onBrowseSaveFolder={browseSaveFolder}
         onBrowseExeFile={browseExeFile}
         onSubmit={handleAddGame}
+      />
+
+      <EditGameModal
+        show={showEditModal}
+        game={editGame}
+        savePath={savePath}
+        exePath={exePath}
+        onClose={() => {
+          setShowEditModal(false);
+          setEditGame(null);
+          setSavePath("");
+          setExePath("");
+        }}
+        onSavePathChange={setSavePath}
+        onExePathChange={setExePath}
+        onBrowseSaveFolder={browseSaveFolder}
+        onBrowseExeFile={browseExeFile}
+        onSubmit={handleUpdateGame}
       />
 
       <ConfirmDialog
