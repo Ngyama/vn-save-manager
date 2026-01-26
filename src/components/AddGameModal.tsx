@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 interface AddGameModalProps {
   show: boolean;
   savePath: string;
@@ -7,7 +9,7 @@ interface AddGameModalProps {
   onExePathChange: (path: string) => void;
   onBrowseSaveFolder: () => void;
   onBrowseExeFile: () => void;
-  onSubmit: (name: string, saveFolderPath: string, exeFilePath: string) => void;
+  onSubmit: (name: string, saveFolderPath: string, exeFilePath: string, saveMode: string, saveConfig: string) => void;
 }
 
 export default function AddGameModal({
@@ -21,7 +23,37 @@ export default function AddGameModal({
   onBrowseExeFile,
   onSubmit,
 }: AddGameModalProps) {
+  const [saveMode, setSaveMode] = useState<string>("single_file");
+  const [extensions, setExtensions] = useState<string>("dat");
+
   if (!show) return null;
+
+  function getSaveConfig(): string {
+    switch (saveMode) {
+      case "single_file":
+        const exts = extensions.split(",").map(e => e.trim()).filter(e => e.length > 0);
+        return JSON.stringify({ extensions: exts.length > 0 ? exts : ["dat"] });
+      case "folder":
+        return JSON.stringify({ 
+          folder_name: null,
+          include_extensions: [],
+          exclude_extensions: []
+        });
+      case "file_group":
+        return JSON.stringify({ 
+          extensions: [],
+          pattern: null,
+          group_by_prefix: true
+        });
+      case "container":
+        return JSON.stringify({ 
+          container_extensions: [],
+          inner_extensions: []
+        });
+      default:
+        return JSON.stringify({ extensions: ["dat"] });
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
@@ -43,7 +75,7 @@ export default function AddGameModal({
               alert("请先选择游戏的可执行文件 (.exe)");
               return;
             }
-            onSubmit(gameName, savePath, exePath);
+            onSubmit(gameName, savePath, exePath, saveMode, getSaveConfig());
           }}
           className="p-6 space-y-5"
         >
@@ -106,9 +138,57 @@ export default function AddGameModal({
               </button>
             </div>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              存档模式
+            </label>
+            <select
+              value={saveMode}
+              onChange={(e) => setSaveMode(e.target.value)}
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="single_file">单文件覆盖（默认）</option>
+              <option value="folder">文件夹备份</option>
+              <option value="file_group">文件组（新增模式）</option>
+              <option value="container">容器文件</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              {saveMode === "single_file" && "每次存档覆盖同一个文件（如 save.dat）"}
+              {saveMode === "folder" && "存档是一个文件夹，包含多个文件（如 savedata/ 文件夹）"}
+              {saveMode === "file_group" && "每次存档新增一组文件（如 save_001.dat + save_001.png）"}
+              {saveMode === "container" && "存档是一个容器文件，内部包含多个文件"}
+            </p>
+          </div>
+
+          {saveMode === "single_file" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                文件扩展名
+              </label>
+              <input
+                type="text"
+                placeholder="dat, save"
+                value={extensions}
+                onChange={(e) => setExtensions(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                用逗号分隔多个扩展名，例如：dat, save
+              </p>
+            </div>
+          )}
+
+          {(saveMode === "folder" || saveMode === "file_group" || saveMode === "container") && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-sm text-blue-800">
+                <strong>注意：</strong>此存档模式的后端支持功能正在开发中，当前仅支持"单文件覆盖"模式。您选择的模式已保存，但暂时不会生效。
+              </p>
+            </div>
+          )}
           
           <p className="text-xs text-gray-500 leading-relaxed">
-            提示：请选择游戏的存档文件夹和exe文件。软件会监控存档文件（例如 .dat）的变化，并针对该exe所在窗口生成快照。
+            提示：请选择游戏的存档文件夹和exe文件。软件会监控存档文件的变化，并针对该exe所在窗口生成快照。
           </p>
           
           <div className="flex justify-end gap-3 pt-2">

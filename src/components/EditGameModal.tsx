@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Game } from "../types";
 
 interface EditGameModalProps {
@@ -10,7 +11,7 @@ interface EditGameModalProps {
   onExePathChange: (path: string) => void;
   onBrowseSaveFolder: () => void;
   onBrowseExeFile: () => void;
-  onSubmit: (gameId: string, name: string, saveFolderPath: string | undefined, exeFilePath: string | undefined) => void;
+  onSubmit: (gameId: string, name: string, saveFolderPath: string | undefined, exeFilePath: string | undefined, saveMode: string | undefined, saveConfig: string | undefined) => void;
 }
 
 export default function EditGameModal({
@@ -25,7 +26,55 @@ export default function EditGameModal({
   onBrowseExeFile,
   onSubmit,
 }: EditGameModalProps) {
+  const [saveMode, setSaveMode] = useState<string>("single_file");
+  const [extensions, setExtensions] = useState<string>("dat");
+
+  useEffect(() => {
+    if (game) {
+      const mode = game.save_mode || "single_file";
+      setSaveMode(mode);
+      
+      if (mode === "single_file" && game.save_config) {
+        try {
+          const config = JSON.parse(game.save_config);
+          if (config.extensions && Array.isArray(config.extensions)) {
+            setExtensions(config.extensions.join(", "));
+          }
+        } catch (e) {
+          // 解析失败，使用默认值
+        }
+      }
+    }
+  }, [game]);
+
   if (!show || !game) return null;
+
+  function getSaveConfig(): string {
+    switch (saveMode) {
+      case "single_file":
+        const exts = extensions.split(",").map(e => e.trim()).filter(e => e.length > 0);
+        return JSON.stringify({ extensions: exts.length > 0 ? exts : ["dat"] });
+      case "folder":
+        return JSON.stringify({ 
+          folder_name: null,
+          include_extensions: [],
+          exclude_extensions: []
+        });
+      case "file_group":
+        return JSON.stringify({ 
+          extensions: [],
+          pattern: null,
+          group_by_prefix: true
+        });
+      case "container":
+        return JSON.stringify({ 
+          container_extensions: [],
+          inner_extensions: []
+        });
+      default:
+        return JSON.stringify({ extensions: ["dat"] });
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
@@ -41,7 +90,7 @@ export default function EditGameModal({
             const gameName = form.gameName.value;
             const newSavePath = form.savePath.value.trim() || undefined;
             const newExePath = form.exePath.value.trim() || undefined;
-            onSubmit(game.id, gameName, newSavePath, newExePath);
+            onSubmit(game.id, gameName, newSavePath, newExePath, saveMode, getSaveConfig());
           }}
           className="p-6 space-y-5"
         >
@@ -60,7 +109,7 @@ export default function EditGameModal({
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              存档文件夹（留空则不修改）
+              存档文件夹
             </label>
             <div className="flex gap-2">
               <input
@@ -85,7 +134,7 @@ export default function EditGameModal({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              游戏可执行文件 (.exe)（留空则不修改）
+              游戏可执行文件 (.exe)
             </label>
             <div className="flex gap-2">
               <input
@@ -107,6 +156,54 @@ export default function EditGameModal({
               <p className="text-xs text-gray-500 mt-1">当前: {game.exe_path}</p>
             )}
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              存档模式
+            </label>
+            <select
+              value={saveMode}
+              onChange={(e) => setSaveMode(e.target.value)}
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="single_file">单文件覆盖（默认）</option>
+              <option value="folder">文件夹备份</option>
+              <option value="file_group">文件组（新增模式）</option>
+              <option value="container">容器文件</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              {saveMode === "single_file" && "每次存档覆盖同一个文件（如 save.dat）"}
+              {saveMode === "folder" && "存档是一个文件夹，包含多个文件（如 savedata/ 文件夹）"}
+              {saveMode === "file_group" && "每次存档新增一组文件（如 save_001.dat + save_001.png）"}
+              {saveMode === "container" && "存档是一个容器文件，内部包含多个文件"}
+            </p>
+          </div>
+
+          {saveMode === "single_file" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                文件扩展名
+              </label>
+              <input
+                type="text"
+                placeholder="dat, save"
+                value={extensions}
+                onChange={(e) => setExtensions(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                用逗号分隔多个扩展名，例如：dat, save
+              </p>
+            </div>
+          )}
+
+          {(saveMode === "folder" || saveMode === "file_group" || saveMode === "container") && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-sm text-blue-800">
+                <strong>注意：</strong>此存档模式的后端支持功能正在开发中，当前仅支持"单文件覆盖"模式。您选择的模式已保存，但暂时不会生效。
+              </p>
+            </div>
+          )}
           
           <p className="text-xs text-gray-500 leading-relaxed">
             提示：如果路径字段留空，则不会修改该路径。修改路径后需要确保新路径存在且有效。

@@ -5,6 +5,8 @@ export interface Game {
     game_folder_path: string;
     save_folder_path?: string;
     cover_image?: string;
+    save_mode?: string;  // 存档模式：single_file, folder, file_group, container
+    save_config?: string;  // JSON 配置字符串
 }
 
 export interface Snapshot {

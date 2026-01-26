@@ -263,7 +263,7 @@ function App() {
     });
   }
 
-  async function handleAddGame(name: string, saveFolderPath: string, exeFilePath: string) {
+  async function handleAddGame(name: string, saveFolderPath: string, exeFilePath: string, saveMode: string, saveConfig: string) {
     if (!saveFolderPath || saveFolderPath.trim() === "") {
       alert("请先选择存档文件夹");
       return;
@@ -277,6 +277,8 @@ function App() {
         name,
         saveFolderPath,
         exePath: exeFilePath,
+        saveMode: saveMode || "single_file",
+        saveConfig: saveConfig || JSON.stringify({ extensions: ["dat"] }),
       });
       await loadGames();
       setShowAddModal(false);
@@ -308,13 +310,15 @@ function App() {
     setShowEditModal(true);
   }
 
-  async function handleUpdateGame(gameId: string, name: string, saveFolderPath: string | undefined, exeFilePath: string | undefined) {
+  async function handleUpdateGame(gameId: string, name: string, saveFolderPath: string | undefined, exeFilePath: string | undefined, saveMode: string | undefined, saveConfig: string | undefined) {
     try {
       await invoke("update_game", {
         gameId,
         name,
         saveFolderPath: saveFolderPath || null,
         exePath: exeFilePath || null,
+        saveMode: saveMode || null,
+        saveConfig: saveConfig || null,
       });
       await loadGames();
       

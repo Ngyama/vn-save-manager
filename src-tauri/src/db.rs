@@ -12,6 +12,8 @@ pub struct Game {
     pub game_folder_path: String,
     pub save_folder_path: Option<String>,
     pub cover_image: Option<String>,
+    pub save_mode: Option<String>,  // 存档模式：single_file, folder, file_group, container
+    pub save_config: Option<String>,  // JSON 配置字符串
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,6 +79,23 @@ impl Database {
         
         let _ = conn.execute(
             "UPDATE games SET game_folder_path = save_folder_path WHERE game_folder_path IS NULL AND save_folder_path IS NOT NULL",
+            [],
+        );
+        
+        // 添加存档模式相关字段
+        let _ = conn.execute(
+            "ALTER TABLE games ADD COLUMN save_mode TEXT",
+            [],
+        );
+        
+        let _ = conn.execute(
+            "ALTER TABLE games ADD COLUMN save_config TEXT",
+            [],
+        );
+        
+        // 为已有游戏设置默认存档模式
+        let _ = conn.execute(
+            "UPDATE games SET save_mode = 'single_file', save_config = '{\"extensions\":[\"dat\"]}' WHERE save_mode IS NULL",
             [],
         );
 
@@ -222,19 +241,22 @@ impl Database {
         Ok(())
     }
 
-    pub fn add_game(&self, name: &str, game_folder_path: &str, save_folder_path: &str, exe_path: Option<&str>) -> Result<String> {
+    pub fn add_game(&self, name: &str, game_folder_path: &str, save_folder_path: &str, exe_path: Option<&str>, save_mode: Option<&str>, save_config: Option<&str>) -> Result<String> {
         let conn = self.connect()?;
         let id = Uuid::new_v4().to_string();
+        // 如果没有提供存档模式，使用默认值
+        let mode = save_mode.unwrap_or("single_file");
+        let config = save_config.unwrap_or("{\"extensions\":[\"dat\"]}");
         conn.execute(
-            "INSERT INTO games (id, name, game_folder_path, save_folder_path, exe_path) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, name, game_folder_path, save_folder_path, exe_path],
+            "INSERT INTO games (id, name, game_folder_path, save_folder_path, exe_path, save_mode, save_config) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, name, game_folder_path, save_folder_path, exe_path, mode, config],
         )?;
         Ok(id)
     }
 
     pub fn get_games(&self) -> Result<Vec<Game>> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT id, name, exe_path, COALESCE(game_folder_path, save_folder_path, '') as game_folder_path, save_folder_path, cover_image FROM games")?;
+        let mut stmt = conn.prepare("SELECT id, name, exe_path, COALESCE(game_folder_path, save_folder_path, '') as game_folder_path, save_folder_path, cover_image, save_mode, save_config FROM games")?;
         let game_iter = stmt.query_map([], |row| {
             Ok(Game {
                 id: row.get(0)?,
@@ -243,6 +265,8 @@ impl Database {
                 game_folder_path: row.get(3)?,
                 save_folder_path: row.get(4)?,
                 cover_image: row.get(5)?,
+                save_mode: row.get(6)?,
+                save_config: row.get(7)?,
             })
         })?;
 
@@ -344,7 +368,7 @@ impl Database {
         Ok(screenshot)
     }
 
-    pub fn update_game(&self, game_id: &str, name: Option<&str>, exe_path: Option<&str>, save_folder_path: Option<&str>, game_folder_path: Option<&str>) -> Result<()> {
+    pub fn update_game(&self, game_id: &str, name: Option<&str>, exe_path: Option<&str>, save_folder_path: Option<&str>, game_folder_path: Option<&str>, save_mode: Option<&str>, save_config: Option<&str>) -> Result<()> {
         let conn = self.connect()?;
         
         if let Some(name) = name {
@@ -363,12 +387,20 @@ impl Database {
             conn.execute("UPDATE games SET game_folder_path = ?1 WHERE id = ?2", params![game_folder_path, game_id])?;
         }
         
+        if let Some(save_mode) = save_mode {
+            conn.execute("UPDATE games SET save_mode = ?1 WHERE id = ?2", params![save_mode, game_id])?;
+        }
+        
+        if let Some(save_config) = save_config {
+            conn.execute("UPDATE games SET save_config = ?1 WHERE id = ?2", params![save_config, game_id])?;
+        }
+        
         Ok(())
     }
 
     pub fn get_game(&self, game_id: &str) -> Result<Game> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare("SELECT id, name, exe_path, game_folder_path, save_folder_path, cover_image FROM games WHERE id = ?1")?;
+        let mut stmt = conn.prepare("SELECT id, name, exe_path, game_folder_path, save_folder_path, cover_image, save_mode, save_config FROM games WHERE id = ?1")?;
         let game = stmt.query_row([game_id], |row| {
             Ok(Game {
                 id: row.get(0)?,
@@ -377,6 +409,8 @@ impl Database {
                 game_folder_path: row.get(3)?,
                 save_folder_path: row.get(4)?,
                 cover_image: row.get(5)?,
+                save_mode: row.get(6)?,
+                save_config: row.get(7)?,
             })
         })?;
         Ok(game)

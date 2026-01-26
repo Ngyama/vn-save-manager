@@ -41,6 +41,8 @@ fn add_game(
     name: String,
     save_folder_path: String,
     exe_path: String,
+    save_mode: Option<String>,
+    save_config: Option<String>,
 ) -> Result<String, String> {
     use std::path::Path;
 
@@ -113,7 +115,7 @@ fn add_game(
 
     let id = state
         .db
-        .add_game(&name, &game_folder_path, &save_folder_path, Some(exe_path.as_str()))
+        .add_game(&name, &game_folder_path, &save_folder_path, Some(exe_path.as_str()), save_mode.as_deref(), save_config.as_deref())
         .map_err(|e| e.to_string())?;
     
     state
@@ -139,6 +141,8 @@ fn update_game(
     name: Option<String>,
     save_folder_path: Option<String>,
     exe_path: Option<String>,
+    save_mode: Option<String>,
+    save_config: Option<String>,
 ) -> Result<(), String> {
     use std::path::Path;
     
@@ -233,6 +237,8 @@ fn update_game(
         exe_path.as_deref(),
         save_folder_path.as_deref(),
         new_game_folder_path.as_deref(),
+        save_mode.as_deref(),
+        save_config.as_deref(),
     ).map_err(|e| e.to_string())?;
     
     // Update watcher if save_folder_path changed
