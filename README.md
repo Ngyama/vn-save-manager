@@ -2,6 +2,10 @@
 
 **Language / 言語 / 语言**: [English](#english) | [日本語](#日本語) | [简体中文](#简体中文)
 
+### 界面展示 / Interface Preview
+
+![VN Save Manager Interface](assets/image.png)
+
 ---
 
 <a name="english"></a>
