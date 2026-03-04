@@ -22,14 +22,35 @@ impl SnapshotManager {
         }
     }
 
-    pub fn process_save_event(&self, changed_file_path: &PathBuf, last_snapshot_time: Arc<Mutex<Instant>>) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(ext) = changed_file_path.extension() {
-            if ext.to_string_lossy().to_lowercase() != "dat" {
-                return Ok(());
-            }
-        } else {
-            return Ok(());
+    fn parse_extensions_from_config(save_config: &Option<String>) -> Vec<String> {
+        let config_str = match save_config {
+            Some(s) => s,
+            None => return vec!["dat".to_string()],
+        };
+        let config: serde_json::Value = match serde_json::from_str(config_str) {
+            Ok(c) => c,
+            Err(_) => return vec!["dat".to_string()],
+        };
+        let arr = match config.get("extensions").and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return vec!["dat".to_string()],
+        };
+        let mut ext_list: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|s| s.to_lowercase().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if ext_list.is_empty() {
+            ext_list.push("dat".to_string());
         }
+        ext_list
+    }
+
+    pub fn process_save_event(&self, changed_file_path: &PathBuf, last_snapshot_time: Arc<Mutex<Instant>>) -> Result<(), Box<dyn std::error::Error>> {
+        let file_ext = changed_file_path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase().to_string());
 
         let games = self.db.get_games()?;
         let mut target_game = None;
@@ -63,6 +84,27 @@ impl SnapshotManager {
                 return Ok(());
             }
         };
+
+        // 只处理 single_file 模式（或其他模式暂未实现时跳过）
+        let save_mode = game.save_mode.as_deref().unwrap_or("single_file");
+        if save_mode != "single_file" {
+            return Ok(());
+        }
+
+        // 从 save_config 解析扩展名列表
+        let extensions = Self::parse_extensions_from_config(&game.save_config);
+        if extensions.is_empty() {
+            return Ok(());
+        }
+
+        // 检查文件扩展名是否在配置的列表中
+        let file_ext = match file_ext {
+            Some(ext) => ext,
+            None => return Ok(()),
+        };
+        if !extensions.contains(&file_ext) {
+            return Ok(());
+        }
 
         let game_folder = PathBuf::from(&game.game_folder_path);
         let snapshots_dir = game_folder.join("visual-logger").join("snapshots");
